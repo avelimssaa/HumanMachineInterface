@@ -1,0 +1,233 @@
+"""Имитационная модель лабораторной работы №2.
+
+Модель использует маршруты диалога из lab1_model. Система имеет одного
+оператора (один канал обслуживания), входящий поток заявок является пуассоновским,
+а отказы образуют поток с выбранным законом времени наработки на отказ.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from .lab1_model import NORMAL_TOPIC, RECOVERY_TOPIC
+
+
+@dataclass(frozen=True)
+class Lab2Config:
+    arrival_rate: float = 1.0
+    failure_mean: float = 100.0
+    r1: float = 1.0
+    r2: float = 5.0
+    duration: float = 1000.0
+    n_replications: int = 100
+    error_probability: float = 0.1
+    failure_distribution: str = "Экспоненциальный"
+    seed: int = 42
+
+
+def validate_lab2_config(config: Lab2Config) -> None:
+    if config.arrival_rate <= 0:
+        raise ValueError("Интенсивность поступления заявок должна быть больше 0.")
+    if config.failure_mean <= 0:
+        raise ValueError("Средняя наработка на отказ должна быть больше 0.")
+    if config.r1 < 0 or config.r2 < 0:
+        raise ValueError("Удельные потери R1 и R2 не могут быть отрицательными.")
+    if config.duration <= 0:
+        raise ValueError("Время моделирования должно быть больше 0.")
+    if config.n_replications <= 0:
+        raise ValueError("Количество экспериментов должно быть больше 0.")
+    if not 0 <= config.error_probability < 1:
+        raise ValueError("Вероятность ошибки Pi должна находиться в диапазоне [0, 1).")
+    if config.failure_distribution not in ("Экспоненциальный", "Равномерный", "Нормальный"):
+        raise ValueError("Неизвестный закон распределения времени наработки на отказ.")
+
+
+def _sample_failure_interval(config: Lab2Config, rng: np.random.Generator) -> float:
+    """Генерирует положительный интервал между отказами.
+
+    Для равномерного закона используется U(0, 2m), для нормального —
+    N(m, (0.1m)^2) с повторной генерацией отрицательных значений.
+    """
+    mean = config.failure_mean
+    if config.failure_distribution == "Экспоненциальный":
+        value = rng.exponential(mean)
+    elif config.failure_distribution == "Равномерный":
+        value = rng.uniform(0.0, 2.0 * mean)
+    else:
+        value = rng.normal(mean, 0.1 * mean)
+        while value <= 0:
+            value = rng.normal(mean, 0.1 * mean)
+    return max(float(value), 1e-9)
+
+
+def _dialogue_time(
+    topic: str,
+    routes: dict[str, list[dict[str, Any]]],
+    error_probability: float,
+    rng: np.random.Generator,
+) -> float:
+    """Время прохождения маршрута с повтором ошибочного шага."""
+    available = routes[topic]
+    probabilities = np.asarray([route["probability"] for route in available], dtype=float)
+    probabilities = probabilities / probabilities.sum()
+    route = available[int(rng.choice(len(available), p=probabilities))]
+    total = 0.0
+    for step_time in route["times"]:
+        attempts = int(rng.geometric(1.0 - error_probability))
+        total += float(step_time) * attempts
+    return total
+
+
+def _simulate_one(
+    config: Lab2Config,
+    routes: dict[str, list[dict[str, Any]]],
+    rng: np.random.Generator,
+) -> dict[str, float | int]:
+    """Одна событийная имитация работы системы на интервале [0, T]."""
+    t = 0.0
+    horizon = config.duration
+    next_arrival = float(rng.exponential(1.0 / config.arrival_rate))
+    next_failure = _sample_failure_interval(config, rng)
+    repair_end = float("inf")
+    downtime_started = None
+    downtime = 0.0
+    is_up = True
+
+    queue: list[float] = []  # времена поступления ожидающих заявок
+    active_arrival: float | None = None
+    service_end = float("inf")
+
+    arrivals = completed = cancelled = failures = 0
+    total_delay = 0.0
+
+    def start_next_service(now: float) -> None:
+        nonlocal active_arrival, service_end
+        if is_up and active_arrival is None and queue:
+            active_arrival = queue.pop(0)
+            service_time = _dialogue_time(
+                NORMAL_TOPIC, routes, config.error_probability, rng
+            )
+            service_end = now + service_time
+
+    while True:
+        candidates = {"arrival": next_arrival}
+        if is_up:
+            candidates["failure"] = next_failure
+            candidates["completion"] = service_end
+        else:
+            candidates["repair"] = repair_end
+
+        event, event_time = min(candidates.items(), key=lambda item: item[1])
+        if event_time > horizon:
+            break
+        t = event_time
+
+        if event == "arrival":
+            arrivals += 1
+            queue.append(t)
+            next_arrival = t + float(rng.exponential(1.0 / config.arrival_rate))
+            start_next_service(t)
+
+        elif event == "completion":
+            completed += 1
+            if active_arrival is not None:
+                total_delay += t - active_arrival
+            active_arrival = None
+            service_end = float("inf")
+            start_next_service(t)
+
+        elif event == "failure":
+            failures += 1
+            is_up = False
+            downtime_started = t
+            # По условию ЛР2 все ожидающие и обрабатываемая заявки задачи 1
+            # аннулируются в момент отказа.
+            if active_arrival is not None:
+                total_delay += t - active_arrival
+                cancelled += 1
+            for arrival_time in queue:
+                total_delay += t - arrival_time
+                cancelled += 1
+            active_arrival = None
+            service_end = float("inf")
+            queue.clear()
+
+            recovery_time = _dialogue_time(
+                RECOVERY_TOPIC, routes, config.error_probability, rng
+            )
+            repair_end = t + recovery_time
+            next_failure = float("inf")
+
+        elif event == "repair":
+            if downtime_started is not None:
+                downtime += t - downtime_started
+            downtime_started = None
+            repair_end = float("inf")
+            is_up = True
+            next_failure = t + _sample_failure_interval(config, rng)
+            start_next_service(t)
+
+    # Учитываем простой, незавершённый диалог и очередь на момент окончания опыта.
+    if not is_up and downtime_started is not None:
+        downtime += horizon - downtime_started
+    if active_arrival is not None:
+        total_delay += horizon - active_arrival
+    for arrival_time in queue:
+        total_delay += horizon - arrival_time
+
+    delay_losses = config.r1 * total_delay
+    downtime_losses = config.r2 * downtime
+    total_losses = delay_losses + downtime_losses
+    mean_delay = total_delay / arrivals if arrivals else 0.0
+    pending = (1 if active_arrival is not None else 0) + len(queue)
+
+    return {
+        "Поступило заявок": arrivals,
+        "Обработано заявок": completed,
+        "Аннулировано заявок": cancelled,
+        "Ожидает завершения": pending,
+        "Количество отказов": failures,
+        "Время простоя, с": downtime,
+        "Доступность, %": 100.0 * (horizon - downtime) / horizon,
+        "Средняя задержка, с": mean_delay,
+        "Потери от задержек": delay_losses,
+        "Потери от простоя": downtime_losses,
+        "Суммарные потери": total_losses,
+        "Потери на заявку": total_losses / arrivals if arrivals else 0.0,
+    }
+
+
+def run_lab2(
+    config: Lab2Config,
+    routes: dict[str, list[dict[str, Any]]],
+) -> dict[str, pd.DataFrame]:
+    """Выполняет серию независимых имитаций и возвращает таблицы результатов."""
+    validate_lab2_config(config)
+    for topic in (NORMAL_TOPIC, RECOVERY_TOPIC):
+        if topic not in routes or not routes[topic]:
+            raise ValueError(f"Не заданы маршруты для подтемы «{topic}».")
+        if any(not route.get("times") for route in routes[topic]):
+            raise ValueError(f"В маршрутах подтемы «{topic}» должны быть шаги.")
+
+    rng = np.random.default_rng(config.seed)
+    rows = []
+    for replication in range(1, config.n_replications + 1):
+        row = _simulate_one(config, routes, rng)
+        row["Эксперимент"] = replication
+        rows.append(row)
+
+    runs_df = pd.DataFrame(rows)
+    metric_columns = [column for column in runs_df.columns if column != "Эксперимент"]
+    summary = []
+    for column in metric_columns:
+        summary.append({
+            "Показатель": column,
+            "Среднее значение": runs_df[column].mean(),
+            "Стандартное отклонение": runs_df[column].std(ddof=1) if len(runs_df) > 1 else 0.0,
+        })
+    summary_df = pd.DataFrame(summary).round(3)
+    return {"runs_df": runs_df.round(3), "summary_df": summary_df}
