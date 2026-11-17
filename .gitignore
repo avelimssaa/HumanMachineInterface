@@ -64,23 +64,19 @@ dmypy.json
 .pydevproject
 .settings/
 
-# --- OS ---
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# --- Matplotlib ---
-# (кеш графиков, если появится)
 *.png
 *.jpg
 *.jpeg
 *.svg
 *.pdf
-# но не трогаем ресурсы проекта:
+
 !docs/**/*.png
 !docs/**/*.svg
 
-# --- Локальные данные / результаты ---
 data/
 results/
 output/
@@ -88,7 +84,6 @@ output/
 *.xlsx
 *.log
 
-# --- Прочее ---
 .env
 .env.*
 !.env.example
