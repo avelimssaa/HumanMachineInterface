@@ -17,6 +17,16 @@ import pandas as pd
 
 NORMAL_TOPIC = "Штатная работа"
 RECOVERY_TOPIC = "Восстановление"
+MAX_ROUTE_STEPS = 10
+MAX_ROUTES_PER_TOPIC = 10
+REPEAT_STEP = "Повторение текущего шага"
+RETURN_TO_PREVIOUS_STEP = "Возврат на предыдущий шаг"
+RETURN_TO_DIALOGUE_START = "Возврат в начало диалога"
+ERROR_STRATEGIES = (
+    REPEAT_STEP,
+    RETURN_TO_PREVIOUS_STEP,
+    RETURN_TO_DIALOGUE_START,
+)
 
 
 @dataclass(frozen=True)
@@ -31,9 +41,10 @@ class Lab1Config:
     max_step_time: int = 5
     error_probabilities: tuple[float, ...] = (0.0, 0.3, 0.6, 0.9)
     topic_probabilities: tuple[float, float] = (0.8, 0.2)
-    route_probabilities: tuple[float, float, float, float] = (
-        0.6, 0.4, 0.7, 0.3
-    )
+    route_counts: tuple[int, int] = (2, 2)
+    route_probabilities: tuple[float, ...] = (0.6, 0.4, 0.7, 0.3)
+    route_steps: tuple[tuple[int, ...] | None, ...] = ()
+    error_strategy: str = REPEAT_STEP
 
 
 def validate_config(config: Lab1Config) -> None:
@@ -45,8 +56,41 @@ def validate_config(config: Lab1Config) -> None:
     if config.min_steps < 1 or config.min_steps > config.max_steps:
         raise ValueError("Границы количества шагов заданы некорректно.")
 
+    if config.max_steps > MAX_ROUTE_STEPS:
+        raise ValueError(f"Количество шагов маршрута не может превышать {MAX_ROUTE_STEPS}.")
+
     if config.min_step_time < 1 or config.min_step_time > config.max_step_time:
         raise ValueError("Границы времени шага заданы некорректно.")
+
+    if len(config.route_counts) != 2 or any(
+        not isinstance(count, int)
+        or not 1 <= count <= MAX_ROUTES_PER_TOPIC
+        for count in config.route_counts
+    ):
+        raise ValueError(
+            f"Для каждой подтемы нужно задать от 1 до {MAX_ROUTES_PER_TOPIC} маршрутов."
+        )
+
+    route_total = sum(config.route_counts)
+    if config.route_steps and len(config.route_steps) != route_total:
+        raise ValueError("Количество наборов шагов должно совпадать с количеством маршрутов.")
+
+    for route_steps in config.route_steps:
+        if route_steps is not None:
+            if not 1 <= len(route_steps) <= MAX_ROUTE_STEPS:
+                raise ValueError(
+                    f"В маршруте должно быть от 1 до {MAX_ROUTE_STEPS} шагов."
+                )
+            if any(
+                not isinstance(step_time, int) or step_time < 1
+                for step_time in route_steps
+            ):
+                raise ValueError(
+                    "Время каждого шага маршрута должно быть целым числом больше 0."
+                )
+
+    if config.error_strategy not in ERROR_STRATEGIES:
+        raise ValueError("Неизвестная стратегия обработки ошибок.")
 
     if not config.error_probabilities:
         raise ValueError("Нужно задать хотя бы одну вероятность ошибки.")
@@ -63,31 +107,34 @@ def validate_config(config: Lab1Config) -> None:
     if not np.isclose(sum(config.topic_probabilities), 1.0):
         raise ValueError("Сумма вероятностей выбора тем должна равняться 1.")
 
-    if len(config.route_probabilities) != 4:
-        raise ValueError("Необходимо задать вероятности четырёх маршрутов.")
+    if len(config.route_probabilities) != route_total:
+        raise ValueError("Для каждого маршрута необходимо задать вероятность.")
 
     if any(not 0 <= p <= 1 for p in config.route_probabilities):
         raise ValueError("Вероятности маршрутов должны находиться в диапазоне [0, 1].")
 
-    if not np.isclose(sum(config.route_probabilities[:2]), 1.0):
-        raise ValueError("Сумма вероятностей маршрутов A1 и A2 должна равняться 1.")
+    normal_count = config.route_counts[0]
+    if not np.isclose(sum(config.route_probabilities[:normal_count]), 1.0):
+        raise ValueError("Сумма вероятностей маршрутов штатной работы должна равняться 1.")
 
-    if not np.isclose(sum(config.route_probabilities[2:]), 1.0):
-        raise ValueError("Сумма вероятностей маршрутов B1 и B2 должна равняться 1.")
+    if not np.isclose(sum(config.route_probabilities[normal_count:]), 1.0):
+        raise ValueError("Сумма вероятностей маршрутов восстановления должна равняться 1.")
 
 
 def generate_routes(config: Lab1Config) -> dict[str, list[dict[str, Any]]]:
     """
-    Генерирует четыре маршрута по правилам исходного ноутбука.
+    Создаёт маршруты по правилам исходного ноутбука.
 
-    Для каждого маршрута случайно определяется число шагов, затем
-    генерируется время выполнения каждого шага.
+    Для маршрутов с заданными временами используются эти шаги; для остальных
+    случайно определяются число шагов и время выполнения каждого шага.
     """
 
     validate_config(config)
     rng = np.random.default_rng(config.seed)
 
-    def generate_steps() -> list[int]:
+    def generate_steps(route_steps: tuple[int, ...] | None) -> list[int]:
+        if route_steps is not None:
+            return list(route_steps)
         n_steps = int(rng.integers(config.min_steps, config.max_steps + 1))
         values = rng.integers(
             config.min_step_time,
@@ -96,18 +143,23 @@ def generate_routes(config: Lab1Config) -> dict[str, list[dict[str, Any]]]:
         )
         return [int(value) for value in values]
 
-    p_a1, p_a2, p_b1, p_b2 = config.route_probabilities
-
-    return {
-        NORMAL_TOPIC: [
-            {"name": "A1", "times": generate_steps(), "probability": p_a1},
-            {"name": "A2", "times": generate_steps(), "probability": p_a2},
-        ],
-        RECOVERY_TOPIC: [
-            {"name": "B1", "times": generate_steps(), "probability": p_b1},
-            {"name": "B2", "times": generate_steps(), "probability": p_b2},
-        ],
-    }
+    normal_count, recovery_count = config.route_counts
+    route_steps = config.route_steps or (None,) * (normal_count + recovery_count)
+    topics = (
+        (NORMAL_TOPIC, "A", normal_count, 0),
+        (RECOVERY_TOPIC, "B", recovery_count, normal_count),
+    )
+    routes = {}
+    for topic, prefix, count, start_index in topics:
+        routes[topic] = [
+            {
+                "name": f"{prefix}{route_index + 1}",
+                "times": generate_steps(route_steps[start_index + route_index]),
+                "probability": config.route_probabilities[start_index + route_index],
+            }
+            for route_index in range(count)
+        ]
+    return routes
 
 
 def routes_to_dataframe(
@@ -134,16 +186,20 @@ def simulate_dialogue(
     routes: dict[str, list[dict[str, Any]]],
     topic_probabilities: tuple[float, float] = (0.8, 0.2),
     rng: np.random.Generator | None = None,
+    error_strategy: str = REPEAT_STEP,
 ) -> dict[str, Any]:
     """
     Имитирует одно решение задачи.
 
     На каждом шаге время прибавляется к общему времени. Если действие
-    ошибочное (случайное число меньше Pi), тот же шаг повторяется.
+    ошибочное (случайное число меньше Pi), обработка выполняется по выбранной
+    стратегии.
     """
 
     if not 0 <= error_probability < 1:
         raise ValueError("Pi должна находиться в диапазоне [0, 1).")
+    if error_strategy not in ERROR_STRATEGIES:
+        raise ValueError("Неизвестная стратегия обработки ошибок.")
 
     if rng is None:
         rng = np.random.default_rng()
@@ -159,12 +215,18 @@ def simulate_dialogue(
     total_time = 0
     total_errors = 0
 
-    for step_time in selected_route["times"]:
-        while True:
-            total_time += int(step_time)
-            if rng.random() >= error_probability:
-                break
-            total_errors += 1
+    step_index = 0
+    while step_index < len(selected_route["times"]):
+        total_time += int(selected_route["times"][step_index])
+        if rng.random() >= error_probability:
+            step_index += 1
+            continue
+
+        total_errors += 1
+        if error_strategy == RETURN_TO_PREVIOUS_STEP:
+            step_index = max(0, step_index - 1)
+        elif error_strategy == RETURN_TO_DIALOGUE_START:
+            step_index = 0
 
     return {
         "topic": topic,
@@ -201,6 +263,7 @@ def simulate_experiment(
                 routes=routes,
                 topic_probabilities=config.topic_probabilities,
                 rng=rng,
+                error_strategy=config.error_strategy,
             )
             rows.append({
                 "Pi": pi,

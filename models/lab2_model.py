@@ -13,7 +13,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .lab1_model import NORMAL_TOPIC, RECOVERY_TOPIC
+from .lab1_model import (
+    ERROR_STRATEGIES,
+    NORMAL_TOPIC,
+    RECOVERY_TOPIC,
+    REPEAT_STEP,
+    RETURN_TO_DIALOGUE_START,
+    RETURN_TO_PREVIOUS_STEP,
+)
 
 
 @dataclass(frozen=True)
@@ -27,6 +34,7 @@ class Lab2Config:
     error_probability: float = 0.1
     failure_distribution: str = "Экспоненциальный"
     seed: int = 42
+    error_strategy: str = REPEAT_STEP
 
 
 def validate_lab2_config(config: Lab2Config) -> None:
@@ -44,6 +52,8 @@ def validate_lab2_config(config: Lab2Config) -> None:
         raise ValueError("Вероятность ошибки Pi должна находиться в диапазоне [0, 1).")
     if config.failure_distribution not in ("Экспоненциальный", "Равномерный", "Нормальный"):
         raise ValueError("Неизвестный закон распределения времени наработки на отказ.")
+    if config.error_strategy not in ERROR_STRATEGIES:
+        raise ValueError("Неизвестная стратегия обработки ошибок.")
 
 
 def _sample_failure_interval(config: Lab2Config, rng: np.random.Generator) -> float:
@@ -69,16 +79,23 @@ def _dialogue_time(
     routes: dict[str, list[dict[str, Any]]],
     error_probability: float,
     rng: np.random.Generator,
+    error_strategy: str,
 ) -> float:
-    """Время прохождения маршрута с повтором ошибочного шага."""
+    """Время прохождения маршрута с выбранной стратегией обработки ошибок."""
     available = routes[topic]
     probabilities = np.asarray([route["probability"] for route in available], dtype=float)
     probabilities = probabilities / probabilities.sum()
     route = available[int(rng.choice(len(available), p=probabilities))]
     total = 0.0
-    for step_time in route["times"]:
-        attempts = int(rng.geometric(1.0 - error_probability))
-        total += float(step_time) * attempts
+    step_index = 0
+    while step_index < len(route["times"]):
+        total += float(route["times"][step_index])
+        if rng.random() >= error_probability:
+            step_index += 1
+        elif error_strategy == RETURN_TO_PREVIOUS_STEP:
+            step_index = max(0, step_index - 1)
+        elif error_strategy == RETURN_TO_DIALOGUE_START:
+            step_index = 0
     return total
 
 
@@ -109,7 +126,8 @@ def _simulate_one(
         if is_up and active_arrival is None and queue:
             active_arrival = queue.pop(0)
             service_time = _dialogue_time(
-                NORMAL_TOPIC, routes, config.error_probability, rng
+                NORMAL_TOPIC, routes, config.error_probability, rng,
+                config.error_strategy,
             )
             service_end = now + service_time
 
@@ -157,7 +175,8 @@ def _simulate_one(
             queue.clear()
 
             recovery_time = _dialogue_time(
-                RECOVERY_TOPIC, routes, config.error_probability, rng
+                RECOVERY_TOPIC, routes, config.error_probability, rng,
+                config.error_strategy,
             )
             repair_end = t + recovery_time
             next_failure = float("inf")
