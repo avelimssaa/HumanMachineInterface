@@ -34,6 +34,8 @@ APP_VERSION = "0.4.0"
 class HumanMachineApp:
     """Главное приложение с вкладками двух лабораторных работ."""
 
+    LAB2_PI_CHOICES = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+
     def __init__(self) -> None:
         self.root = ttk.Window(
             title=f"{APP_TITLE} — Лабораторные работы №1 и №2",
@@ -382,7 +384,6 @@ class HumanMachineApp:
         self.lab2_r2 = tk.StringVar(value="5.0")
         self.lab2_duration = tk.StringVar(value="1000")
         self.lab2_runs = tk.StringVar(value="100")
-        self.lab2_pi = tk.StringVar(value="0.1")
         self.lab2_seed = tk.StringVar(value="42")
 
         fields = [
@@ -392,13 +393,39 @@ class HumanMachineApp:
             ("Удельные потери R2 (простой)", self.lab2_r2),
             ("Время моделирования, с", self.lab2_duration),
             ("Количество экспериментов", self.lab2_runs),
-            ("Вероятность ошибки оператора Pi", self.lab2_pi),
             ("Начальное значение генератора", self.lab2_seed),
         ]
         row = 1
         for label, variable in fields:
             self._add_entry(parameters, label, variable, row)
             row += 2
+
+        ttk.Label(
+            parameters,
+            text="Вероятности ошибки оператора Pi (можно выбрать несколько)",
+        ).grid(row=row, column=0, sticky=W, pady=(8, 3))
+        row += 1
+        pi_list_frame = ttk.Frame(parameters)
+        pi_list_frame.grid(row=row, column=0, sticky=NSEW)
+        row += 1
+        self.lab2_pi_listbox = tk.Listbox(
+            pi_list_frame,
+            selectmode=tk.MULTIPLE,
+            exportselection=False,
+            height=7,
+            width=30,
+            activestyle="dotbox",
+        )
+        self.lab2_pi_scrollbar = ttk.Scrollbar(
+            pi_list_frame, orient=VERTICAL, command=self.lab2_pi_listbox.yview
+        )
+        self.lab2_pi_listbox.configure(yscrollcommand=self.lab2_pi_scrollbar.set)
+        self.lab2_pi_listbox.pack(side=LEFT, fill=BOTH, expand=YES)
+        self.lab2_pi_scrollbar.pack(side=RIGHT, fill=Y)
+        for pi_value in self.LAB2_PI_CHOICES:
+            self.lab2_pi_listbox.insert(tk.END, f"{pi_value:g}")
+        default_index = self.LAB2_PI_CHOICES.index(0.1)
+        self.lab2_pi_listbox.selection_set(default_index)
 
         ttk.Label(parameters, text="Закон времени наработки на отказ").grid(
             row=row, column=0, sticky=W, pady=(8, 4)
@@ -471,10 +498,14 @@ class HumanMachineApp:
         output.add(self.lab2_charts_frame, text="Графики")
         self.lab2_summary_tree = self._create_tree(self.lab2_summary_frame)
         self.lab2_runs_tree = self._create_tree(self.lab2_runs_frame)
+        self.lab2_pi_frame = ttk.Frame(output, padding=8)
+        output.add(self.lab2_pi_frame, text="Потери L(Pi)")
+        self.lab2_pi_tree = self._create_tree(self.lab2_pi_frame)
 
         self.lab2_figure = Figure(figsize=(10, 5), dpi=100, constrained_layout=True)
-        self.lab2_ax_losses = self.lab2_figure.add_subplot(1, 2, 1)
-        self.lab2_ax_distribution = self.lab2_figure.add_subplot(1, 2, 2)
+        self.lab2_ax_losses = self.lab2_figure.add_subplot(2, 2, (1, 2))
+        self.lab2_ax_decomposition = self.lab2_figure.add_subplot(2, 2, 3)
+        self.lab2_ax_distribution = self.lab2_figure.add_subplot(2, 2, 4)
         self.lab2_canvas = FigureCanvasTkAgg(self.lab2_figure, master=self.lab2_charts_frame)
         self.lab2_canvas.get_tk_widget().pack(fill=BOTH, expand=YES)
         self.lab2_result = None
@@ -712,7 +743,7 @@ class HumanMachineApp:
 
         pi_values = sorted(results_df["Pi"].unique())
         n_hist_rows = (len(pi_values) + 1) // 2
-        total_rows = n_hist_rows + 1 
+        total_rows = n_hist_rows + 1
 
         figure_height = max(7, n_hist_rows * 4.5 + 4.0)
         self.lab1_figure.clear()
@@ -763,10 +794,24 @@ class HumanMachineApp:
 
     def _draw_empty_lab2_charts(self) -> None:
         self.lab2_ax_losses.clear()
+        self.lab2_ax_decomposition.clear()
         self.lab2_ax_distribution.clear()
-        self.lab2_ax_losses.set_title("Структура средних потерь")
+        self.lab2_ax_losses.set_title("L(Pi) — суммарные потери")
+        self.lab2_ax_decomposition.set_title("Разложение L(Pi): R1- и R2-компоненты")
         self.lab2_ax_distribution.set_title("Распределение суммарных потерь")
         self.lab2_canvas.draw_idle()
+
+    def _get_lab2_pi_values(self) -> tuple[float, ...]:
+        selected = tuple(
+            float(self.lab2_pi_listbox.get(index))
+            for index in self.lab2_pi_listbox.curselection()
+        )
+        if not selected:
+            raise ValueError(
+                "Выберите хотя бы одно значение вероятности ошибки Pi "
+                "(удерживайте Ctrl или Shift для множественного выбора)."
+            )
+        return selected
 
     def _run_lab2(self) -> None:
         try:
@@ -777,7 +822,7 @@ class HumanMachineApp:
                 r2=float(self.lab2_r2.get()),
                 duration=float(self.lab2_duration.get()),
                 n_replications=int(self.lab2_runs.get()),
-                error_probability=float(self.lab2_pi.get()),
+                error_probabilities=self._get_lab2_pi_values(),
                 failure_distribution=self.lab2_distribution.get(),
                 seed=int(self.lab2_seed.get()),
                 error_strategy=self.lab2_error_strategy.get(),
@@ -809,21 +854,24 @@ class HumanMachineApp:
             result = run_lab2(config, routes)
             self.lab2_result = result
 
-            summary = result["summary_df"].set_index("Показатель")
+            pi_summary = result["pi_summary_df"]
+            overall_losses = float(
+                result["runs_df"]["Суммарные потери"].mean()
+            )
             self.lab2_metric_processed.configure(
-                text=f"{summary.loc['Обработано заявок', 'Среднее значение']:.1f}"
+                text=f"{float(result['runs_df']['Обработано заявок'].mean()):.1f}"
             )
             self.lab2_metric_downtime.configure(
-                text=f"{summary.loc['Время простоя, с', 'Среднее значение']:.2f} с"
+                text=f"{float(result['runs_df']['Время простоя, с'].mean()):.2f} с"
             )
-            self.lab2_metric_losses.configure(
-                text=f"{summary.loc['Суммарные потери', 'Среднее значение']:.2f}"
-            )
+            self.lab2_metric_losses.configure(text=f"{overall_losses:.2f}")
             self._fill_tree(self.lab2_summary_tree, result["summary_df"])
             self._fill_tree(self.lab2_runs_tree, result["runs_df"])
+            self._fill_tree(self.lab2_pi_tree, pi_summary)
             self._draw_lab2_charts(result)
             self.status_var.set(
-                f"ЛР №2 завершена: выполнено {config.n_replications} имитационных экспериментов."
+                f"ЛР №2 завершена: {len(pi_summary)} значений Pi × "
+                f"{config.n_replications} имитационных экспериментов."
             )
         except (ValueError, TypeError, KeyError) as exc:
             messagebox.showerror("Некорректные параметры", str(exc), parent=self.root)
@@ -836,27 +884,66 @@ class HumanMachineApp:
 
     def _draw_lab2_charts(self, result) -> None:
         runs = result["runs_df"]
-        summary = result["summary_df"].set_index("Показатель")
+        pi_summary = result["pi_summary_df"].sort_values("Pi")
+
         self.lab2_ax_losses.clear()
+        self.lab2_ax_decomposition.clear()
         self.lab2_ax_distribution.clear()
 
-        delay_loss = float(summary.loc["Потери от задержек", "Среднее значение"])
-        downtime_loss = float(summary.loc["Потери от простоя", "Среднее значение"])
-        self.lab2_ax_losses.bar(
-            ["Задержки заявок", "Простой системы"],
-            [delay_loss, downtime_loss],
-            edgecolor="black", alpha=0.8,
+        pi_values = pi_summary["Pi"].to_numpy(dtype=float)
+
+        # 1. Главная кривая — суммарные потери L(Pi).
+        mean_losses = pi_summary["Суммарные потери"].to_numpy(dtype=float)
+        std_losses = pi_summary["Суммарные потери — Стд. отклонение"].to_numpy(dtype=float)
+        ax = self.lab2_ax_losses
+        ax.errorbar(
+            pi_values, mean_losses, yerr=std_losses,
+            marker="o", linewidth=2.5, markersize=7, capsize=4,
+            label="L(Pi) — средние суммарные потери",
         )
-        self.lab2_ax_losses.set_title("Средние потери по компонентам")
-        self.lab2_ax_losses.set_ylabel("Потери")
-        self.lab2_ax_losses.grid(axis="y", alpha=0.25)
-        self.lab2_ax_distribution.hist(
-            runs["Суммарные потери"], bins="auto", edgecolor="black", alpha=0.8
+        for pi, loss in zip(pi_values, mean_losses):
+            ax.annotate(f"{loss:,.0f}", (pi, loss), textcoords="offset points",
+                        xytext=(0, 10), ha="center", fontsize=8)
+        ax.set_title("Зависимость суммарных потерь L от вероятности ошибки Pi",
+                     fontsize=13, pad=10)
+        ax.set_xlabel("Вероятность ошибки оператора Pi")
+        ax.set_ylabel("Суммарные потери L(Pi)")
+        ax.grid(True, alpha=0.25)
+        ax.legend(loc="best")
+
+        # 2. Разложение L(Pi) на R1- и R2-компоненты.
+        r1_component = pi_summary["Потери от задержек"].to_numpy(dtype=float)
+        r2_component = pi_summary["Потери от простоя"].to_numpy(dtype=float)
+        dominant_r1 = r1_component.mean() >= r2_component.mean()
+        dominant_label = "R1 (задержки)" if dominant_r1 else "R2 (простой)"
+
+        ax_dec = self.lab2_ax_decomposition
+        ax_dec.plot(
+            pi_values, r1_component,
+            marker="s", linewidth=2.2, color="tab:blue",
+            label="R1-компонента (задержки заявок)",
         )
+        ax_dec.plot(
+            pi_values, r2_component,
+            marker="^", linewidth=2.2, color="tab:orange",
+            label="R2-компонента (простой системы)",
+        )
+        ax_dec.fill_between(pi_values, r1_component, r2_component, alpha=0.12, color="grey")
+        ax_dec.set_title(f"Разложение L(Pi): доминирует {dominant_label}",
+                        fontsize=12, pad=10)
+        ax_dec.set_xlabel("Вероятность ошибки оператора Pi")
+        ax_dec.set_ylabel("Компоненты потерь")
+        ax_dec.grid(True, alpha=0.25)
+        ax_dec.legend(loc="best", fontsize=9)
+
+        # 3. Гистограмма суммарных потерь (по всем прогонам).
+        self.lab2_ax_distribution.hist(runs["Суммарные потери"], bins="auto",
+                                       edgecolor="black", alpha=0.8)
         self.lab2_ax_distribution.set_title("Распределение суммарных потерь")
         self.lab2_ax_distribution.set_xlabel("Суммарные потери")
         self.lab2_ax_distribution.set_ylabel("Частота")
         self.lab2_ax_distribution.grid(axis="y", alpha=0.25)
+
         self.lab2_figure.tight_layout()
         self.lab2_canvas.draw_idle()
 
@@ -904,7 +991,9 @@ class HumanMachineApp:
         self.lab2_r2.set("5.0")
         self.lab2_duration.set("1000")
         self.lab2_runs.set("100")
-        self.lab2_pi.set("0.1")
+        for index in range(self.lab2_pi_listbox.size()):
+            self.lab2_pi_listbox.selection_clear(index)
+        self.lab2_pi_listbox.selection_set(self.LAB2_PI_CHOICES.index(0.1))
         self.lab2_seed.set("42")
         self.lab2_distribution.set("Экспоненциальный")
         self.lab2_error_strategy.set(ERROR_STRATEGIES[0])
