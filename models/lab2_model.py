@@ -31,7 +31,7 @@ class Lab2Config:
     r2: float = 5.0
     duration: float = 1000.0
     n_replications: int = 100
-    error_probability: float = 0.1
+    error_probabilities: tuple[float, ...] = (0.1,)
     failure_distribution: str = "Экспоненциальный"
     seed: int = 42
     error_strategy: str = REPEAT_STEP
@@ -48,8 +48,10 @@ def validate_lab2_config(config: Lab2Config) -> None:
         raise ValueError("Время моделирования должно быть больше 0.")
     if config.n_replications <= 0:
         raise ValueError("Количество экспериментов должно быть больше 0.")
-    if not 0 <= config.error_probability < 1:
-        raise ValueError("Вероятность ошибки Pi должна находиться в диапазоне [0, 1).")
+    if not config.error_probabilities:
+        raise ValueError("Должна быть задана хотя бы одна вероятность ошибки Pi.")
+    if any(not 0 <= p < 1 for p in config.error_probabilities):
+        raise ValueError("Вероятности ошибки Pi должны находиться в диапазоне [0, 1).")
     if config.failure_distribution not in ("Экспоненциальный", "Равномерный", "Нормальный"):
         raise ValueError("Неизвестный закон распределения времени наработки на отказ.")
     if config.error_strategy not in ERROR_STRATEGIES:
@@ -103,6 +105,7 @@ def _simulate_one(
     config: Lab2Config,
     routes: dict[str, list[dict[str, Any]]],
     rng: np.random.Generator,
+    error_probability: float,
 ) -> dict[str, float | int]:
     """Одна событийная имитация работы системы на интервале [0, T]."""
     t = 0.0
@@ -126,7 +129,7 @@ def _simulate_one(
         if is_up and active_arrival is None and queue:
             active_arrival = queue.pop(0)
             service_time = _dialogue_time(
-                NORMAL_TOPIC, routes, config.error_probability, rng,
+                NORMAL_TOPIC, routes, error_probability, rng,
                 config.error_strategy,
             )
             service_end = now + service_time
@@ -175,7 +178,7 @@ def _simulate_one(
             queue.clear()
 
             recovery_time = _dialogue_time(
-                RECOVERY_TOPIC, routes, config.error_probability, rng,
+                RECOVERY_TOPIC, routes, error_probability, rng,
                 config.error_strategy,
             )
             repair_end = t + recovery_time
@@ -224,7 +227,14 @@ def run_lab2(
     config: Lab2Config,
     routes: dict[str, list[dict[str, Any]]],
 ) -> dict[str, pd.DataFrame]:
-    """Выполняет серию независимых имитаций и возвращает таблицы результатов."""
+    """Выполняет серию независимых имитаций для каждой заданной Pi.
+
+    Возвращает:
+      runs_df — результаты отдельных прогонов (со столбцом «Pi»);
+      summary_df — сводная статистика по каждому показателю и каждой Pi;
+      pi_summary_df — средние значения ключевых показателей по Pi
+        (используется для графиков L(Pi) и разложения потерь на R1/R2).
+    """
     validate_lab2_config(config)
     for topic in (NORMAL_TOPIC, RECOVERY_TOPIC):
         if topic not in routes or not routes[topic]:
@@ -234,19 +244,53 @@ def run_lab2(
 
     rng = np.random.default_rng(config.seed)
     rows = []
-    for replication in range(1, config.n_replications + 1):
-        row = _simulate_one(config, routes, rng)
-        row["Эксперимент"] = replication
-        rows.append(row)
+    for pi in sorted(set(float(p) for p in config.error_probabilities)):
+        for replication in range(1, config.n_replications + 1):
+            row = _simulate_one(config, routes, rng, pi)
+            row["Эксперимент"] = replication
+            row["Pi"] = pi
+            rows.append(row)
 
     runs_df = pd.DataFrame(rows)
-    metric_columns = [column for column in runs_df.columns if column != "Эксперимент"]
-    summary = []
-    for column in metric_columns:
-        summary.append({
-            "Показатель": column,
-            "Среднее значение": runs_df[column].mean(),
-            "Стандартное отклонение": runs_df[column].std(ddof=1) if len(runs_df) > 1 else 0.0,
-        })
-    summary_df = pd.DataFrame(summary).round(3)
-    return {"runs_df": runs_df.round(3), "summary_df": summary_df}
+    metric_columns = [
+        column for column in runs_df.columns
+        if column not in ("Эксперимент", "Pi")
+    ]
+
+    summary_rows = []
+    for pi, group in runs_df.groupby("Pi"):
+        for column in metric_columns:
+            summary_rows.append({
+                "Pi": pi,
+                "Показатель": column,
+                "Среднее значение": group[column].mean(),
+                "Стандартное отклонение": group[column].std(ddof=1) if len(group) > 1 else 0.0,
+            })
+    summary_df = pd.DataFrame(summary_rows).round(3)
+
+    key_metrics = (
+        "Потери от задержек",
+        "Потери от простоя",
+        "Суммарные потери",
+        "Время простоя, с",
+        "Средняя задержка, с",
+        "Доступность, %",
+        "Обработано заявок",
+        "Аннулировано заявок",
+        "Количество отказов",
+        "Потери на заявку",
+    )
+    grouped = runs_df.groupby("Pi")
+    mean_df = grouped[list(key_metrics)].mean().reset_index()
+    std_df = grouped[list(key_metrics)].std(ddof=1).fillna(0.0).reset_index()
+    std_df.columns = [
+        "Pi" if column == "Pi" else f"{column} — Стд. отклонение"
+        for column in std_df.columns
+    ]
+    pi_summary_df = mean_df.merge(std_df, on="Pi").round(3)
+
+    return {
+        "runs_df": runs_df.round(3),
+        "summary_df": summary_df,
+        "pi_summary_df": pi_summary_df,
+    }
