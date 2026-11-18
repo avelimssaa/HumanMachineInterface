@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any
 
 import numpy as np
@@ -35,15 +36,12 @@ class Lab1Config:
 
     n_simulations: int = 10_000
     seed: int = 42
-    min_steps: int = 2
-    max_steps: int = 5
-    min_step_time: int = 2
-    max_step_time: int = 5
     error_probabilities: tuple[float, ...] = (0.0, 0.3, 0.6, 0.9)
     topic_probabilities: tuple[float, float] = (0.8, 0.2)
     route_counts: tuple[int, int] = (2, 2)
     route_probabilities: tuple[float, ...] = (0.6, 0.4, 0.7, 0.3)
-    route_steps: tuple[tuple[int, ...] | None, ...] = ()
+    route_forms: tuple[tuple[str, ...], ...] = ()
+    route_times: tuple[tuple[float, ...], ...] = ()
     error_strategy: str = REPEAT_STEP
 
 
@@ -52,15 +50,6 @@ def validate_config(config: Lab1Config) -> None:
 
     if config.n_simulations <= 0:
         raise ValueError("Количество имитаций должно быть положительным.")
-
-    if config.min_steps < 1 or config.min_steps > config.max_steps:
-        raise ValueError("Границы количества шагов заданы некорректно.")
-
-    if config.max_steps > MAX_ROUTE_STEPS:
-        raise ValueError(f"Количество шагов маршрута не может превышать {MAX_ROUTE_STEPS}.")
-
-    if config.min_step_time < 1 or config.min_step_time > config.max_step_time:
-        raise ValueError("Границы времени шага заданы некорректно.")
 
     if len(config.route_counts) != 2 or any(
         not isinstance(count, int)
@@ -72,22 +61,32 @@ def validate_config(config: Lab1Config) -> None:
         )
 
     route_total = sum(config.route_counts)
-    if config.route_steps and len(config.route_steps) != route_total:
-        raise ValueError("Количество наборов шагов должно совпадать с количеством маршрутов.")
+    if bool(config.route_forms) != bool(config.route_times):
+        raise ValueError("Нужно задать обе матрицы: экранные формы и время.")
+    if config.route_forms and (
+        len(config.route_forms) != route_total
+        or len(config.route_times) != route_total
+    ):
+        raise ValueError("Матрицы форм и времени должны содержать строку для каждого маршрута.")
 
-    for route_steps in config.route_steps:
-        if route_steps is not None:
-            if not 1 <= len(route_steps) <= MAX_ROUTE_STEPS:
-                raise ValueError(
-                    f"В маршруте должно быть от 1 до {MAX_ROUTE_STEPS} шагов."
-                )
-            if any(
-                not isinstance(step_time, int) or step_time < 1
-                for step_time in route_steps
-            ):
-                raise ValueError(
-                    "Время каждого шага маршрута должно быть целым числом больше 0."
-                )
+    for forms, times in zip(config.route_forms, config.route_times):
+        if not 1 <= len(forms) <= MAX_ROUTE_STEPS:
+            raise ValueError(
+                f"В маршруте должно быть от 1 до {MAX_ROUTE_STEPS} экранных форм."
+            )
+        if len(forms) != len(times):
+            raise ValueError(
+                "Число экранных форм и времён в строке маршрута должно совпадать."
+            )
+        if any(not isinstance(form, str) or not form.strip() for form in forms):
+            raise ValueError("Название каждой экранной формы не может быть пустым.")
+        if any(
+            not isinstance(duration, (int, float))
+            or not isfinite(duration)
+            or duration <= 0
+            for duration in times
+        ):
+            raise ValueError("Время каждой экранной формы должно быть числом больше 0.")
 
     if config.error_strategy not in ERROR_STRATEGIES:
         raise ValueError("Неизвестная стратегия обработки ошибок.")
@@ -123,28 +122,16 @@ def validate_config(config: Lab1Config) -> None:
 
 def generate_routes(config: Lab1Config) -> dict[str, list[dict[str, Any]]]:
     """
-    Создаёт маршруты по правилам исходного ноутбука.
-
-    Для маршрутов с заданными временами используются эти шаги; для остальных
-    случайно определяются число шагов и время выполнения каждого шага.
+    Создаёт маршруты из матриц последовательностей экранных форм и времени.
     """
 
     validate_config(config)
-    rng = np.random.default_rng(config.seed)
-
-    def generate_steps(route_steps: tuple[int, ...] | None) -> list[int]:
-        if route_steps is not None:
-            return list(route_steps)
-        n_steps = int(rng.integers(config.min_steps, config.max_steps + 1))
-        values = rng.integers(
-            config.min_step_time,
-            config.max_step_time + 1,
-            size=n_steps,
-        )
-        return [int(value) for value in values]
 
     normal_count, recovery_count = config.route_counts
-    route_steps = config.route_steps or (None,) * (normal_count + recovery_count)
+    default_forms = ("Экран 1", "Экран 2")
+    default_times = (2.0, 3.0)
+    route_forms = config.route_forms or (default_forms,) * (normal_count + recovery_count)
+    route_times = config.route_times or (default_times,) * (normal_count + recovery_count)
     topics = (
         (NORMAL_TOPIC, "A", normal_count, 0),
         (RECOVERY_TOPIC, "B", recovery_count, normal_count),
@@ -154,7 +141,8 @@ def generate_routes(config: Lab1Config) -> dict[str, list[dict[str, Any]]]:
         routes[topic] = [
             {
                 "name": f"{prefix}{route_index + 1}",
-                "times": generate_steps(route_steps[start_index + route_index]),
+                "forms": list(route_forms[start_index + route_index]),
+                "times": list(route_times[start_index + route_index]),
                 "probability": config.route_probabilities[start_index + route_index],
             }
             for route_index in range(count)
@@ -173,8 +161,9 @@ def routes_to_dataframe(
             rows.append({
                 "Подтема": topic,
                 "Маршрут": route["name"],
-                "Время шагов, с": route["times"],
-                "Количество шагов": len(route["times"]),
+                "Экранные формы": route["forms"],
+                "Время форм, с": route["times"],
+                "Количество экранных форм": len(route["forms"]),
                 "Вероятность маршрута": route["probability"],
                 "Суммарное время маршрута, с": sum(route["times"]),
             })

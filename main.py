@@ -20,6 +20,8 @@ from matplotlib.figure import Figure
 from models.lab1_model import (
     ERROR_STRATEGIES,
     Lab1Config,
+    MAX_ROUTE_STEPS,
+    MAX_ROUTES_PER_TOPIC,
     get_histogram_bins,
     generate_routes,
     run_lab1,
@@ -143,10 +145,6 @@ class HumanMachineApp:
         )
 
         self.lab1_seed = tk.StringVar(value="42")
-        self.lab1_min_steps = tk.StringVar(value="2")
-        self.lab1_max_steps = tk.StringVar(value="5")
-        self.lab1_min_step_time = tk.StringVar(value="2")
-        self.lab1_max_step_time = tk.StringVar(value="5")
         self.lab1_runs = tk.StringVar(value="10000")
         self.lab1_pi_text = tk.StringVar(value="0, 0.3, 0.6, 0.9")
         self.lab1_topic_normal = tk.StringVar(value="0.8")
@@ -159,21 +157,33 @@ class HumanMachineApp:
             [tk.StringVar(value=value) for value in ("0.6", "0.4") + ("0",) * 8],
             [tk.StringVar(value=value) for value in ("0.7", "0.3") + ("0",) * 8],
         ]
-        self.lab1_route_step_vars = [
-            [tk.StringVar() for _ in range(10)],
-            [tk.StringVar() for _ in range(10)],
+        self.lab1_route_form_vars = [
+            [
+                [
+                    tk.StringVar(value=f"Экран {step + 1}" if step < 2 else "")
+                    for step in range(MAX_ROUTE_STEPS)
+                ]
+                for _ in range(MAX_ROUTES_PER_TOPIC)
+            ]
+            for _ in range(2)
         ]
-        self.lab1_route_input_frames = []
+        self.lab1_route_time_vars = [
+            [
+                [
+                    tk.StringVar(value=str(step + 2) if step < 2 else "")
+                    for step in range(MAX_ROUTE_STEPS)
+                ]
+                for _ in range(MAX_ROUTES_PER_TOPIC)
+            ]
+            for _ in range(2)
+        ]
+        self.lab1_route_matrix_frames = []
         self.lab1_error_strategy = tk.StringVar(value=ERROR_STRATEGIES[0])
         self.lab1_bins = tk.StringVar(value="Автоматически")
 
         row = 1
         fields = [
             ("Начальное значение генератора", self.lab1_seed),
-            ("Минимальное количество шагов", self.lab1_min_steps),
-            ("Максимальное количество шагов", self.lab1_max_steps),
-            ("Минимальное время шага, с", self.lab1_min_step_time),
-            ("Максимальное время шага, с", self.lab1_max_step_time),
             ("Количество имитаций для каждого Pi", self.lab1_runs),
             ("Вероятности ошибки через запятую", self.lab1_pi_text),
         ]
@@ -193,59 +203,6 @@ class HumanMachineApp:
         ]:
             self._add_entry(parameters, f"Вероятность темы «{label}»", variable, row)
             row += 2
-
-        ttk.Separator(parameters).grid(row=row, column=0, sticky=EW, pady=12)
-        row += 1
-        route_settings = ttk.Labelframe(
-            parameters, text="Маршруты по подтемам", padding=8
-        )
-        route_settings.grid(row=row, column=0, sticky=EW)
-        route_settings.columnconfigure(0, weight=1)
-        self.lab1_route_input_frames = []
-        for topic_index, (topic, prefix) in enumerate(
-            (("Штатная работа", "A"), ("Восстановление", "B"))
-        ):
-            topic_frame = ttk.Labelframe(
-                route_settings, text=topic, padding=6
-            )
-            topic_frame.grid(
-                row=topic_index, column=0, sticky=EW,
-                pady=(0 if topic_index == 0 else 8, 0),
-            )
-            topic_frame.columnconfigure(0, weight=1)
-            ttk.Label(topic_frame, text="Количество маршрутов (1–10)").grid(
-                row=0, column=0, sticky=W, pady=(0, 3)
-            )
-            count_selector = ttk.Combobox(
-                topic_frame,
-                textvariable=self.lab1_route_counts[topic_index],
-                values=tuple(str(value) for value in range(1, 11)),
-                state="readonly",
-            )
-            count_selector.grid(row=1, column=0, sticky=EW)
-            count_selector.bind(
-                "<<ComboboxSelected>>",
-                lambda _event, index=topic_index: self._on_route_count_changed(index),
-            )
-            route_inputs = ttk.Frame(topic_frame)
-            route_inputs.grid(row=2, column=0, sticky=EW, pady=(4, 0))
-            self.lab1_route_input_frames.append((route_inputs, prefix))
-            self._render_route_inputs(topic_index)
-        ttk.Label(
-            route_settings,
-            text="Вероятности маршрутов одной подтемы должны в сумме давать 1. "
-            "При смене количества маршрутов вероятности сбрасываются на равные. "
-            "Пустая длительность шага — случайная генерация.",
-            wraplength=270, bootstyle="secondary",
-        ).grid(row=2, column=0, sticky=W, pady=(5, 0))
-        row += 1
-        ttk.Label(
-            parameters,
-            text="В каждом маршруте можно указать до 10 шагов — положительные целые "
-            "длительности в секундах.",
-            wraplength=280, bootstyle="secondary",
-        ).grid(row=row, column=0, sticky=W, pady=(2, 4))
-        row += 1
 
         ttk.Label(parameters, text="Стратегия обработки ошибок", style="Section.TLabel").grid(
             row=row, column=0, sticky=W, pady=(8, 4)
@@ -278,8 +235,8 @@ class HumanMachineApp:
                    command=self._reset_lab1).grid(row=row, column=0, sticky=EW, pady=(8, 0))
         row += 1
         ttk.Label(parameters, text=(
-            "Стратегия ошибок применяется к моделированию ЛР1. Вероятности двух тем "
-            "и маршрутов каждой подтемы должны в сумме давать 1."
+            "Матрицы маршрутов задаются во вкладке результатов «Матрицы маршрутов». "
+            "Стратегия ошибок здесь применяется к моделированию ЛР1."
         ), wraplength=280, bootstyle="secondary").grid(row=row, column=0, sticky=W, pady=(14, 0))
 
         ttk.Label(results, text="Результаты эксперимента", style="Section.TLabel").grid(
@@ -298,11 +255,14 @@ class HumanMachineApp:
         self.lab1_summary_frame = ttk.Frame(output, padding=8)
         self.lab1_routes_frame = ttk.Frame(output, padding=8)
         self.lab1_charts_frame = ttk.Frame(output, padding=8)
+        self.lab1_matrices_frame = ttk.Frame(output, padding=8)
         output.add(self.lab1_summary_frame, text="Сводная таблица")
         output.add(self.lab1_routes_frame, text="Маршруты")
         output.add(self.lab1_charts_frame, text="Графики")
+        output.add(self.lab1_matrices_frame, text="Матрицы маршрутов")
         self.lab1_summary_tree = self._create_tree(self.lab1_summary_frame)
         self.lab1_routes_tree = self._create_tree(self.lab1_routes_frame)
+        self._build_route_matrix_editor(self.lab1_matrices_frame)
         # Прокручиваемая область для крупных графиков.
         plot_container = ttk.Frame(self.lab1_charts_frame)
         plot_container.pack(fill=BOTH, expand=YES)
@@ -516,50 +476,146 @@ class HumanMachineApp:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky=W, pady=(4, 3))
         ttk.Entry(parent, textvariable=variable).grid(row=row + 1, column=0, sticky=EW)
 
-    def _render_route_inputs(self, topic_index: int) -> None:
-        route_frame, prefix = self.lab1_route_input_frames[topic_index]
-        for child in route_frame.winfo_children():
-            child.destroy()
+    def _build_route_matrix_editor(self, parent) -> None:
+        ttk.Label(
+            parent,
+            text=(
+                "Матрицы сопоставляются по строкам маршрутов и позициям экранных форм. "
+                "Заполняйте значения слева направо; пустые ячейки справа не учитываются."
+            ),
+            wraplength=900,
+            bootstyle="secondary",
+        ).pack(anchor=W, pady=(0, 8))
+        topic_notebook = ttk.Notebook(parent)
+        topic_notebook.pack(fill=BOTH, expand=YES)
+        self.lab1_route_matrix_frames = []
+
+        for topic_index, (topic, prefix) in enumerate(
+            (("Штатная работа", "A"), ("Восстановление", "B"))
+        ):
+            topic_page = ttk.Frame(topic_notebook, padding=8)
+            topic_notebook.add(topic_page, text=topic)
+            topic_page.columnconfigure(0, weight=1)
+            ttk.Label(topic_page, text="Количество маршрутов (1–10)").grid(
+                row=0, column=0, sticky=W, pady=(0, 3)
+            )
+            count_selector = ttk.Combobox(
+                topic_page,
+                textvariable=self.lab1_route_counts[topic_index],
+                values=tuple(str(value) for value in range(1, MAX_ROUTES_PER_TOPIC + 1)),
+                state="readonly",
+                width=8,
+            )
+            count_selector.grid(row=1, column=0, sticky=W)
+            count_selector.bind(
+                "<<ComboboxSelected>>",
+                lambda _event, index=topic_index: self._on_route_count_changed(index),
+            )
+
+            matrix_notebook = ttk.Notebook(topic_page)
+            matrix_notebook.grid(row=2, column=0, sticky=NSEW, pady=(8, 0))
+            topic_page.rowconfigure(2, weight=1)
+            forms_tab = ttk.Frame(matrix_notebook, padding=6)
+            times_tab = ttk.Frame(matrix_notebook, padding=6)
+            matrix_notebook.add(forms_tab, text="Матрица маршрутов")
+            matrix_notebook.add(times_tab, text="Матрица времени")
+            forms_inner = self._create_matrix_scroll_area(forms_tab)
+            times_inner = self._create_matrix_scroll_area(times_tab)
+            self.lab1_route_matrix_frames.append(
+                (forms_inner, times_inner, prefix)
+            )
+            self._render_route_matrices(topic_index)
+
+    @staticmethod
+    def _create_matrix_scroll_area(parent):
+        wrapper = ttk.Frame(parent)
+        wrapper.pack(fill=BOTH, expand=YES)
+        wrapper.rowconfigure(0, weight=1)
+        wrapper.columnconfigure(0, weight=1)
+        canvas = tk.Canvas(wrapper, highlightthickness=0)
+        vertical_scroll = ttk.Scrollbar(
+            wrapper, orient=VERTICAL, command=canvas.yview
+        )
+        horizontal_scroll = ttk.Scrollbar(
+            wrapper, orient=HORIZONTAL, command=canvas.xview
+        )
+        canvas.configure(
+            yscrollcommand=vertical_scroll.set,
+            xscrollcommand=horizontal_scroll.set,
+        )
+        canvas.grid(row=0, column=0, sticky=NSEW)
+        vertical_scroll.grid(row=0, column=1, sticky=NS)
+        horizontal_scroll.grid(row=1, column=0, sticky=EW)
+        content = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind(
+            "<Configure>",
+            lambda _event: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        return content
+
+    def _render_route_matrices(self, topic_index: int) -> None:
+        forms_frame, times_frame, prefix = self.lab1_route_matrix_frames[topic_index]
+        for frame in (forms_frame, times_frame):
+            for child in frame.winfo_children():
+                child.destroy()
+
+        ttk.Label(forms_frame, text="Маршрут").grid(row=0, column=0, padx=3, pady=3)
+        ttk.Label(forms_frame, text="P").grid(row=0, column=1, padx=3, pady=3)
+        ttk.Label(times_frame, text="Маршрут").grid(row=0, column=0, padx=3, pady=3)
+        for step in range(MAX_ROUTE_STEPS):
+            ttk.Label(forms_frame, text=f"Форма {step + 1}").grid(
+                row=0, column=step + 2, padx=3, pady=3
+            )
+            ttk.Label(times_frame, text=f"Время {step + 1}, с").grid(
+                row=0, column=step + 1, padx=3, pady=3
+            )
 
         route_count = int(self.lab1_route_counts[topic_index].get())
-        route_frame.columnconfigure(0, weight=1)
-        for index in range(route_count):
-            route_name = f"{prefix}{index + 1}"
-            row = index * 5
-            ttk.Label(
-                route_frame, text=f"Маршрут {route_name}", style="Section.TLabel"
-            ).grid(row=row, column=0, sticky=W, pady=(4, 0))
-            self._add_entry(
-                route_frame,
-                f"Вероятность выбора {route_name}",
-                self.lab1_route_probability_vars[topic_index][index],
-                row + 1,
+        for route_index in range(route_count):
+            row = route_index + 1
+            ttk.Label(forms_frame, text=f"{prefix}{route_index + 1}").grid(
+                row=row, column=0, padx=3, pady=3
             )
-            self._add_entry(
-                route_frame,
-                f"Шаги {route_name}, длительности через запятую (с)",
-                self.lab1_route_step_vars[topic_index][index],
-                row + 3,
+            ttk.Entry(
+                forms_frame,
+                textvariable=self.lab1_route_probability_vars[topic_index][route_index],
+                width=9,
+            ).grid(row=row, column=1, padx=3, pady=3)
+            ttk.Label(times_frame, text=f"{prefix}{route_index + 1}").grid(
+                row=row, column=0, padx=3, pady=3
             )
+            for step in range(MAX_ROUTE_STEPS):
+                ttk.Entry(
+                    forms_frame,
+                    textvariable=self.lab1_route_form_vars[topic_index][route_index][step],
+                    width=14,
+                ).grid(row=row, column=step + 2, padx=3, pady=3)
+                ttk.Entry(
+                    times_frame,
+                    textvariable=self.lab1_route_time_vars[topic_index][route_index][step],
+                    width=10,
+                ).grid(row=row, column=step + 1, padx=3, pady=3)
 
     def _on_route_count_changed(self, topic_index: int) -> None:
         route_count = int(self.lab1_route_counts[topic_index].get())
-        # probability = f"{1 / route_count:.6g}"
         probability = repr(1 / route_count)
         for variable in self.lab1_route_probability_vars[topic_index][:route_count]:
             variable.set(probability)
-        self._render_route_inputs(topic_index)
+        self._render_route_matrices(topic_index)
 
     def _get_lab1_route_data(
         self,
     ) -> tuple[
         tuple[int, int],
         tuple[float, ...],
-        tuple[tuple[int, ...] | None, ...],
+        tuple[tuple[str, ...], ...],
+        tuple[tuple[float, ...], ...],
     ]:
         route_counts = tuple(int(variable.get()) for variable in self.lab1_route_counts)
         route_probabilities = []
-        route_steps = []
+        route_forms = []
+        route_times = []
         for topic_index, (count, prefix) in enumerate(zip(route_counts, ("A", "B"))):
             for index in range(count):
                 name = f"{prefix}{index + 1}"
@@ -572,33 +628,50 @@ class HumanMachineApp:
                         f"Укажите вероятность выбора маршрута {name}."
                     ) from exc
                 route_probabilities.append(probability)
-                route_steps.append(
-                    self._parse_route_steps(
-                        self.lab1_route_step_vars[topic_index][index].get()
-                    )
+
+                form_cells = [
+                    variable.get().strip()
+                    for variable in self.lab1_route_form_vars[topic_index][index]
+                ]
+                time_cells = [
+                    variable.get().strip()
+                    for variable in self.lab1_route_time_vars[topic_index][index]
+                ]
+                forms = self._matrix_row(form_cells, f"экранные формы маршрута {name}")
+                times_text = self._matrix_row(
+                    time_cells, f"время форм маршрута {name}"
                 )
-        return route_counts, tuple(route_probabilities), tuple(route_steps)
+                if len(forms) != len(times_text):
+                    raise ValueError(
+                        f"Маршрут {name}: число экранных форм и времён должно совпадать."
+                    )
+                try:
+                    times = tuple(float(value) for value in times_text)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Время форм маршрута {name} должно быть числовым."
+                    ) from exc
+                route_forms.append(forms)
+                route_times.append(times)
+        return (
+            route_counts,
+            tuple(route_probabilities),
+            tuple(route_forms),
+            tuple(route_times),
+        )
 
     @staticmethod
-    def _parse_route_steps(value: str) -> tuple[int, ...] | None:
-        value = value.strip()
-        if not value:
-            return None
-
-        parts = [part.strip() for part in value.split(",")]
-        if len(parts) > 10:
-            raise ValueError("В маршруте нельзя указать больше 10 шагов.")
-        if any(not part for part in parts):
-            raise ValueError("Длительности шагов нужно разделять запятыми без пустых значений.")
-
-        try:
-            steps = tuple(int(part) for part in parts)
-        except ValueError as exc:
-            raise ValueError("Длительности шагов должны быть целыми числами.") from exc
-
-        if any(step <= 0 for step in steps):
-            raise ValueError("Длительность каждого шага должна быть больше 0.")
-        return steps
+    def _matrix_row(cells: list[str], label: str) -> tuple[str, ...]:
+        last_filled = max(
+            (index for index, value in enumerate(cells) if value),
+            default=-1,
+        )
+        if last_filled < 0:
+            raise ValueError(f"Заполните {label}.")
+        values = cells[:last_filled + 1]
+        if any(not value for value in values):
+            raise ValueError(f"{label.capitalize()} нужно заполнять слева направо без пропусков.")
+        return tuple(values)
 
     @staticmethod
     def _metric_card(parent, title: str, value: str, column: int):
@@ -672,15 +745,16 @@ class HumanMachineApp:
         try:
             n_simulations = int(self.lab1_runs.get())
             seed = int(self.lab1_seed.get())
-            min_steps = int(self.lab1_min_steps.get())
-            max_steps = int(self.lab1_max_steps.get())
-            min_step_time = int(self.lab1_min_step_time.get())
-            max_step_time = int(self.lab1_max_step_time.get())
             selected_pi = tuple(float(x.strip()) for x in self.lab1_pi_text.get().split(",") if x.strip())
             if not selected_pi:
                 raise ValueError("Введите хотя бы одну вероятность ошибки Pi через запятую.")
             topic_probabilities = (float(self.lab1_topic_normal.get()), float(self.lab1_topic_recovery.get()))
-            route_counts, route_probabilities, route_steps = self._get_lab1_route_data()
+            (
+                route_counts,
+                route_probabilities,
+                route_forms,
+                route_times,
+            ) = self._get_lab1_route_data()
 
             bins_value = self.lab1_bins.get()
             bins = None if bins_value == "Автоматически" else int(bins_value)
@@ -688,15 +762,12 @@ class HumanMachineApp:
             config = Lab1Config(
                 n_simulations=n_simulations,
                 seed=seed,
-                min_steps=min_steps,
-                max_steps=max_steps,
-                min_step_time=min_step_time,
-                max_step_time=max_step_time,
                 error_probabilities=selected_pi,
                 topic_probabilities=topic_probabilities,
                 route_counts=route_counts,
                 route_probabilities=route_probabilities,
-                route_steps=route_steps,
+                route_forms=route_forms,
+                route_times=route_times,
                 error_strategy=self.lab1_error_strategy.get(),
             )
 
@@ -828,16 +899,17 @@ class HumanMachineApp:
                 error_strategy=self.lab2_error_strategy.get(),
             )
 
-            route_counts, route_probabilities, route_steps = self._get_lab1_route_data()
+            (
+                route_counts,
+                route_probabilities,
+                route_forms,
+                route_times,
+            ) = self._get_lab1_route_data()
 
             # Для ЛР2 используются те же маршруты диалога, что и в ЛР1.
             route_config = Lab1Config(
                 n_simulations=1,
                 seed=config.seed,
-                min_steps=int(self.lab1_min_steps.get()),
-                max_steps=int(self.lab1_max_steps.get()),
-                min_step_time=int(self.lab1_min_step_time.get()),
-                max_step_time=int(self.lab1_max_step_time.get()),
                 error_probabilities=(0.0,),
                 topic_probabilities=(
                     float(self.lab1_topic_normal.get()),
@@ -845,7 +917,8 @@ class HumanMachineApp:
                 ),
                 route_counts=route_counts,
                 route_probabilities=route_probabilities,
-                route_steps=route_steps,
+                route_forms=route_forms,
+                route_times=route_times,
             )
             routes = generate_routes(route_config)
 
@@ -950,10 +1023,6 @@ class HumanMachineApp:
     def _reset_lab1(self) -> None:
         defaults = {
             self.lab1_seed: "42",
-            self.lab1_min_steps: "2",
-            self.lab1_max_steps: "5",
-            self.lab1_min_step_time: "2",
-            self.lab1_max_step_time: "5",
             self.lab1_runs: "10000",
             self.lab1_pi_text: "0, 0.3, 0.6, 0.9",
             self.lab1_topic_normal: "0.8",
@@ -972,9 +1041,15 @@ class HumanMachineApp:
                 self.lab1_route_probability_vars[topic_index]
             ):
                 variable.set(values[index] if index < len(values) else "0")
-            for variable in self.lab1_route_step_vars[topic_index]:
-                variable.set("")
-            self._render_route_inputs(topic_index)
+            for route_index in range(MAX_ROUTES_PER_TOPIC):
+                for step in range(MAX_ROUTE_STEPS):
+                    self.lab1_route_form_vars[topic_index][route_index][step].set(
+                        f"Экран {step + 1}" if step < 2 else ""
+                    )
+                    self.lab1_route_time_vars[topic_index][route_index][step].set(
+                        str(step + 2) if step < 2 else ""
+                    )
+            self._render_route_matrices(topic_index)
         self.lab1_metric_runs.configure(text="—")
         self.lab1_metric_mean.configure(text="—")
         self.lab1_metric_median.configure(text="—")

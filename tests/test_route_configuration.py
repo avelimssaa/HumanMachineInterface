@@ -26,29 +26,46 @@ class ScriptedRng:
 
 
 class RouteConfigurationTests(unittest.TestCase):
-    def test_explicit_route_steps_override_random_generation(self):
+    def test_explicit_route_matrices_are_used(self):
         config = Lab1Config(
-            route_steps=((1, 3, 5), (2,), (4, 6), (7, 8, 9, 10)),
+            route_forms=(
+                ("Главная", "Поиск", "Результаты"),
+                ("Главная", "Настройки"),
+                ("Авторизация", "Восстановление"),
+                ("Авторизация", "Подтверждение"),
+            ),
+            route_times=((1, 3, 5), (2, 4), (4, 6), (7, 8)),
         )
 
         routes = generate_routes(config)
 
+        self.assertEqual(
+            routes[NORMAL_TOPIC][0]["forms"],
+            ["Главная", "Поиск", "Результаты"],
+        )
         self.assertEqual(routes[NORMAL_TOPIC][0]["times"], [1, 3, 5])
-        self.assertEqual(routes[NORMAL_TOPIC][1]["times"], [2])
+        self.assertEqual(routes[NORMAL_TOPIC][1]["forms"], ["Главная", "Настройки"])
         self.assertEqual(routes["Восстановление"][0]["times"], [4, 6])
-        self.assertEqual(routes["Восстановление"][1]["times"], [7, 8, 9, 10])
+        self.assertEqual(
+            routes["Восстановление"][1]["forms"],
+            ["Авторизация", "Подтверждение"],
+        )
 
-    def test_route_with_more_than_ten_steps_is_rejected(self):
-        config = Lab1Config(route_steps=((1,) * 11, None, None, None))
+    def test_route_with_more_than_ten_forms_is_rejected(self):
+        config = Lab1Config(
+            route_forms=(("Экран",) * 11,) * 4,
+            route_times=((1,) * 11,) * 4,
+        )
 
-        with self.assertRaisesRegex(ValueError, "не может превышать 10|от 1 до 10"):
+        with self.assertRaisesRegex(ValueError, "от 1 до 10 экранных форм"):
             validate_config(config)
 
     def test_route_counts_and_probabilities_are_configurable_per_topic(self):
         config = Lab1Config(
             route_counts=(3, 1),
             route_probabilities=(0.2, 0.3, 0.5, 1.0),
-            route_steps=((1,), None, (2, 3), (4,)),
+            route_forms=(("A",), ("B", "C"), ("D",), ("E",)),
+            route_times=((1,), (2, 3), (4,), (5,)),
         )
 
         routes = generate_routes(config)
@@ -80,6 +97,15 @@ class RouteConfigurationTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "штатной работы"):
+            validate_config(config)
+
+    def test_form_and_time_matrices_must_have_matching_dimensions(self):
+        config = Lab1Config(
+            route_forms=(("Экран 1", "Экран 2"),) * 4,
+            route_times=((1,),) * 4,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Число экранных форм и времён"):
             validate_config(config)
 
     def test_return_to_previous_step_repeats_previous_step_after_error(self):
