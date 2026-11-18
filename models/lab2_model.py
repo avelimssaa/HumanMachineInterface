@@ -223,17 +223,47 @@ def _simulate_one(
     }
 
 
+def routes_to_matrices(
+    routes: dict[str, list[dict[str, Any]]],
+) -> tuple[tuple[tuple[float, ...], ...], tuple[tuple[float, ...], ...]]:
+    """Преобразует маршруты обратно в две матрицы (для отображения в UI)."""
+    topics = (NORMAL_TOPIC, RECOVERY_TOPIC)
+    max_forms = max(
+        len(route["times"])
+        for topic in topics
+        for route in routes.get(topic, [])
+    )
+    time_matrix = []
+    for row_index, topic in enumerate(topics):
+        times = [0.0] * (max_forms + 1)
+        for route in routes.get(topic, []):
+            for form_index, step_time in enumerate(route["times"], start=1):
+                times[form_index] = float(step_time)
+        time_matrix.append(tuple(times))
+
+    route_matrix = []
+    for row_index, topic in enumerate(topics):
+        for route in routes.get(topic, []):
+            forms = [float(form) for form in route["times"]]
+            route_matrix.append(
+                (float(row_index), float(route["probability"]), *forms)
+            )
+    return tuple(route_matrix), tuple(time_matrix)
+
+
 def run_lab2(
     config: Lab2Config,
     routes: dict[str, list[dict[str, Any]]],
-) -> dict[str, pd.DataFrame]:
+) -> dict[str, Any]:
     """Выполняет серию независимых имитаций для каждой заданной Pi.
 
     Возвращает:
       runs_df — результаты отдельных прогонов (со столбцом «Pi»);
       summary_df — сводная статистика по каждому показателю и каждой Pi;
       pi_summary_df — средние значения ключевых показателей по Pi
-        (используется для графиков L(Pi) и разложения потерь на R1/R2).
+        (используется для графиков L(Pi) и разложения потерь на R1/R2);
+      route_matrix / time_matrix — использованные матрицы маршрутов
+        и времён экранных форм.
     """
     validate_lab2_config(config)
     for topic in (NORMAL_TOPIC, RECOVERY_TOPIC):
@@ -243,6 +273,7 @@ def run_lab2(
             raise ValueError(f"В маршрутах подтемы «{topic}» должны быть шаги.")
 
     rng = np.random.default_rng(config.seed)
+    route_matrix, time_matrix = routes_to_matrices(routes)
     rows = []
     for pi in sorted(set(float(p) for p in config.error_probabilities)):
         for replication in range(1, config.n_replications + 1):
@@ -293,4 +324,6 @@ def run_lab2(
         "runs_df": runs_df.round(3),
         "summary_df": summary_df,
         "pi_summary_df": pi_summary_df,
+        "route_matrix": route_matrix,
+        "time_matrix": time_matrix,
     }

@@ -25,6 +25,13 @@ from models.lab1_model import (
     run_lab1,
 )
 from models.lab2_model import Lab2Config, run_lab2
+from models.route_matrices import (
+    DEFAULT_ROUTE_MATRIX,
+    DEFAULT_TIME_MATRIX,
+    format_matrix,
+    parse_matrix,
+    routes_from_matrices,
+)
 
 
 APP_TITLE = "Человеко-машинный интерфейс"
@@ -813,6 +820,17 @@ class HumanMachineApp:
             )
         return selected
 
+    def _get_lab2_routes(self):
+        """Собирает маршруты ЛР2 из двух матриц на вкладке результатов."""
+        route_matrix = parse_matrix(
+            self.lab2_route_matrix_text.get("1.0", tk.END), "Маршруты (матрица 1)"
+        )
+        time_matrix = parse_matrix(
+            self.lab2_time_matrix_text.get("1.0", tk.END), "Времена форм (матрица 2)"
+        )
+        routes = routes_from_matrices(route_matrix, time_matrix)
+        return routes, route_matrix, time_matrix
+
     def _run_lab2(self) -> None:
         try:
             config = Lab2Config(
@@ -828,31 +846,13 @@ class HumanMachineApp:
                 error_strategy=self.lab2_error_strategy.get(),
             )
 
-            route_counts, route_probabilities, route_steps = self._get_lab1_route_data()
-
-            # Для ЛР2 используются те же маршруты диалога, что и в ЛР1.
-            route_config = Lab1Config(
-                n_simulations=1,
-                seed=config.seed,
-                min_steps=int(self.lab1_min_steps.get()),
-                max_steps=int(self.lab1_max_steps.get()),
-                min_step_time=int(self.lab1_min_step_time.get()),
-                max_step_time=int(self.lab1_max_step_time.get()),
-                error_probabilities=(0.0,),
-                topic_probabilities=(
-                    float(self.lab1_topic_normal.get()),
-                    float(self.lab1_topic_recovery.get()),
-                ),
-                route_counts=route_counts,
-                route_probabilities=route_probabilities,
-                route_steps=route_steps,
-            )
-            routes = generate_routes(route_config)
+            routes, _, _ = self._get_lab2_routes()
 
             self.status_var.set("Выполняется моделирование лабораторной №2…")
             self.root.update_idletasks()
             result = run_lab2(config, routes)
             self.lab2_result = result
+            self._fill_lab2_matrices(result)
 
             pi_summary = result["pi_summary_df"]
             overall_losses = float(
