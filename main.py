@@ -117,8 +117,6 @@ class HumanMachineApp:
         self.lab1_tab.columnconfigure(1, weight=1)
         self.lab1_tab.rowconfigure(0, weight=1)
 
-        # Левая панель прокручивается: все параметры эксперимента доступны
-        # даже при небольшом разрешении экрана.
         left = ttk.Frame(self.lab1_tab)
         left.grid(row=0, column=0, sticky=NSEW, padx=(0, 12))
         left.rowconfigure(0, weight=1)
@@ -157,26 +155,26 @@ class HumanMachineApp:
             [tk.StringVar(value=value) for value in ("0.6", "0.4") + ("0",) * 8],
             [tk.StringVar(value=value) for value in ("0.7", "0.3") + ("0",) * 8],
         ]
+
+        self.lab1_form_name_vars = [
+            tk.StringVar(value=f"Экран {i + 1}" if i < 2 else "")
+            for i in range(MAX_ROUTE_STEPS)
+        ]
+        self.lab1_form_time_vars = [
+            tk.StringVar(value=str(i + 2) if i < 2 else "")
+            for i in range(MAX_ROUTE_STEPS)
+        ]
+
         self.lab1_route_form_vars = [
-            [
                 [
-                    tk.StringVar(value=f"Экран {step + 1}" if step < 2 else "")
-                    for step in range(MAX_ROUTE_STEPS)
+                    [
+                        tk.StringVar(value=f"Экран {step + 1}" if step < 2 else "")
+                        for step in range(MAX_ROUTE_STEPS)
+                    ]
+                    for _ in range(MAX_ROUTES_PER_TOPIC)
                 ]
-                for _ in range(MAX_ROUTES_PER_TOPIC)
+                for _ in range(2)
             ]
-            for _ in range(2)
-        ]
-        self.lab1_route_time_vars = [
-            [
-                [
-                    tk.StringVar(value=str(step + 2) if step < 2 else "")
-                    for step in range(MAX_ROUTE_STEPS)
-                ]
-                for _ in range(MAX_ROUTES_PER_TOPIC)
-            ]
-            for _ in range(2)
-        ]
         self.lab1_route_matrix_frames = []
         self.lab1_error_strategy = tk.StringVar(value=ERROR_STRATEGIES[0])
         self.lab1_bins = tk.StringVar(value="Автоматически")
@@ -480,12 +478,36 @@ class HumanMachineApp:
         ttk.Label(
             parent,
             text=(
-                "Матрицы сопоставляются по строкам маршрутов и позициям экранных форм. "
-                "Заполняйте значения слева направо; пустые ячейки справа не учитываются."
+                "Справочник экранных форм задаёт время каждой формы. "
+                "Матрица маршрутов показывает, какие формы входят в маршрут. "
+                "Время маршрута — сумма времён его форм из справочника."
             ),
             wraplength=900,
             bootstyle="secondary",
         ).pack(anchor=W, pady=(0, 8))
+
+        dictionary_frame = ttk.Labelframe(
+            parent, text="Справочник экранных форм", padding=8
+        )
+        dictionary_frame.pack(fill=X, pady=(0, 8))
+        ttk.Label(dictionary_frame, text="Экранная форма").grid(
+            row=0, column=0, padx=4, pady=2
+        )
+        ttk.Label(dictionary_frame, text="Время, с").grid(
+            row=0, column=1, padx=4, pady=2
+        )
+        for i in range(MAX_ROUTE_STEPS):
+            ttk.Entry(
+                dictionary_frame,
+                textvariable=self.lab1_form_name_vars[i],
+                width=18,
+            ).grid(row=i + 1, column=0, padx=4, pady=1)
+            ttk.Entry(
+                dictionary_frame,
+                textvariable=self.lab1_form_time_vars[i],
+                width=10,
+            ).grid(row=i + 1, column=1, padx=4, pady=1)
+
         topic_notebook = ttk.Notebook(parent)
         topic_notebook.pack(fill=BOTH, expand=YES)
         self.lab1_route_matrix_frames = []
@@ -496,13 +518,14 @@ class HumanMachineApp:
             topic_page = ttk.Frame(topic_notebook, padding=8)
             topic_notebook.add(topic_page, text=topic)
             topic_page.columnconfigure(0, weight=1)
+
             ttk.Label(topic_page, text="Количество маршрутов (1–10)").grid(
                 row=0, column=0, sticky=W, pady=(0, 3)
             )
             count_selector = ttk.Combobox(
                 topic_page,
                 textvariable=self.lab1_route_counts[topic_index],
-                values=tuple(str(value) for value in range(1, MAX_ROUTES_PER_TOPIC + 1)),
+                values=tuple(str(v) for v in range(1, MAX_ROUTES_PER_TOPIC + 1)),
                 state="readonly",
                 width=8,
             )
@@ -512,24 +535,15 @@ class HumanMachineApp:
                 lambda _event, index=topic_index: self._on_route_count_changed(index),
             )
 
-            matrix_notebook = ttk.Notebook(topic_page)
-            matrix_notebook.grid(row=2, column=0, sticky=NSEW, pady=(8, 0))
+            matrix_content = self._create_matrix_scroll_area(topic_page, row=2, column=0)
             topic_page.rowconfigure(2, weight=1)
-            forms_tab = ttk.Frame(matrix_notebook, padding=6)
-            times_tab = ttk.Frame(matrix_notebook, padding=6)
-            matrix_notebook.add(forms_tab, text="Матрица маршрутов")
-            matrix_notebook.add(times_tab, text="Матрица времени")
-            forms_inner = self._create_matrix_scroll_area(forms_tab)
-            times_inner = self._create_matrix_scroll_area(times_tab)
-            self.lab1_route_matrix_frames.append(
-                (forms_inner, times_inner, prefix)
-            )
+            self.lab1_route_matrix_frames.append((matrix_content, prefix))
             self._render_route_matrices(topic_index)
 
     @staticmethod
-    def _create_matrix_scroll_area(parent):
+    def _create_matrix_scroll_area(parent, row: int, column: int):
         wrapper = ttk.Frame(parent)
-        wrapper.pack(fill=BOTH, expand=YES)
+        wrapper.grid(row=row, column=column, sticky=NSEW)   # ← grid, не pack
         wrapper.rowconfigure(0, weight=1)
         wrapper.columnconfigure(0, weight=1)
         canvas = tk.Canvas(wrapper, highlightthickness=0)
@@ -555,47 +569,36 @@ class HumanMachineApp:
         return content
 
     def _render_route_matrices(self, topic_index: int) -> None:
-        forms_frame, times_frame, prefix = self.lab1_route_matrix_frames[topic_index]
-        for frame in (forms_frame, times_frame):
-            for child in frame.winfo_children():
-                child.destroy()
+        matrix_frame, prefix = self.lab1_route_matrix_frames[topic_index]
+        for child in matrix_frame.winfo_children():
+            child.destroy()
 
-        ttk.Label(forms_frame, text="Маршрут").grid(row=0, column=0, padx=3, pady=3)
-        ttk.Label(forms_frame, text="P").grid(row=0, column=1, padx=3, pady=3)
-        ttk.Label(times_frame, text="Маршрут").grid(row=0, column=0, padx=3, pady=3)
+        ttk.Label(matrix_frame, text="Маршрут").grid(
+            row=0, column=0, padx=3, pady=3
+        )
+        ttk.Label(matrix_frame, text="P").grid(row=0, column=1, padx=3, pady=3)
         for step in range(MAX_ROUTE_STEPS):
-            ttk.Label(forms_frame, text=f"Форма {step + 1}").grid(
+            ttk.Label(matrix_frame, text=f"Шаг {step + 1}").grid(
                 row=0, column=step + 2, padx=3, pady=3
-            )
-            ttk.Label(times_frame, text=f"Время {step + 1}, с").grid(
-                row=0, column=step + 1, padx=3, pady=3
             )
 
         route_count = int(self.lab1_route_counts[topic_index].get())
         for route_index in range(route_count):
             row = route_index + 1
-            ttk.Label(forms_frame, text=f"{prefix}{route_index + 1}").grid(
+            ttk.Label(matrix_frame, text=f"{prefix}{route_index + 1}").grid(
                 row=row, column=0, padx=3, pady=3
             )
             ttk.Entry(
-                forms_frame,
+                matrix_frame,
                 textvariable=self.lab1_route_probability_vars[topic_index][route_index],
                 width=9,
             ).grid(row=row, column=1, padx=3, pady=3)
-            ttk.Label(times_frame, text=f"{prefix}{route_index + 1}").grid(
-                row=row, column=0, padx=3, pady=3
-            )
             for step in range(MAX_ROUTE_STEPS):
                 ttk.Entry(
-                    forms_frame,
+                    matrix_frame,
                     textvariable=self.lab1_route_form_vars[topic_index][route_index][step],
-                    width=14,
+                    width=16,
                 ).grid(row=row, column=step + 2, padx=3, pady=3)
-                ttk.Entry(
-                    times_frame,
-                    textvariable=self.lab1_route_time_vars[topic_index][route_index][step],
-                    width=10,
-                ).grid(row=row, column=step + 1, padx=3, pady=3)
 
     def _on_route_count_changed(self, topic_index: int) -> None:
         route_count = int(self.lab1_route_counts[topic_index].get())
@@ -610,12 +613,29 @@ class HumanMachineApp:
         tuple[int, int],
         tuple[float, ...],
         tuple[tuple[str, ...], ...],
-        tuple[tuple[float, ...], ...],
+        tuple[tuple[str, float], ...],
     ]:
-        route_counts = tuple(int(variable.get()) for variable in self.lab1_route_counts)
-        route_probabilities = []
-        route_forms = []
-        route_times = []
+        route_counts = tuple(int(v.get()) for v in self.lab1_route_counts)
+
+        form_times_list: list[tuple[str, float]] = []
+        for name_var, time_var in zip(self.lab1_form_name_vars, self.lab1_form_time_vars):
+            name = name_var.get().strip()
+            raw_time = time_var.get().strip()
+            if not name and not raw_time:
+                continue
+            if not name:
+                raise ValueError("Укажите имя экранной формы во всех заполненных строках справочника.")
+            try:
+                duration = float(raw_time)
+            except ValueError as exc:
+                raise ValueError(f"Время формы «{name}» должно быть числом.") from exc
+            if duration <= 0:
+                raise ValueError(f"Время формы «{name}» должно быть больше 0.")
+            form_times_list.append((name, duration))
+        form_times = tuple(form_times_list)
+
+        route_probabilities: list[float] = []
+        route_forms: list[tuple[str, ...]] = []
         for topic_index, (count, prefix) in enumerate(zip(route_counts, ("A", "B"))):
             for index in range(count):
                 name = f"{prefix}{index + 1}"
@@ -629,49 +649,29 @@ class HumanMachineApp:
                     ) from exc
                 route_probabilities.append(probability)
 
-                form_cells = [
-                    variable.get().strip()
-                    for variable in self.lab1_route_form_vars[topic_index][index]
+                cells = [
+                    var.get().strip()
+                    for var in self.lab1_route_form_vars[topic_index][index]
                 ]
-                time_cells = [
-                    variable.get().strip()
-                    for variable in self.lab1_route_time_vars[topic_index][index]
-                ]
-                forms = self._matrix_row(form_cells, f"экранные формы маршрута {name}")
-                times_text = self._matrix_row(
-                    time_cells, f"время форм маршрута {name}"
+
+                last_filled = max(
+                    (i for i, v in enumerate(cells) if v), default=-1
                 )
-                if len(forms) != len(times_text):
+                if last_filled < 0:
+                    raise ValueError(f"Заполните маршрут {name} экранными формами.")
+                forms = cells[: last_filled + 1]
+                if any(not v for v in forms):
                     raise ValueError(
-                        f"Маршрут {name}: число экранных форм и времён должно совпадать."
+                        f"Маршрут {name}: формы нужно заполнять слева направо без пропусков."
                     )
-                try:
-                    times = tuple(float(value) for value in times_text)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"Время форм маршрута {name} должно быть числовым."
-                    ) from exc
-                route_forms.append(forms)
-                route_times.append(times)
+                route_forms.append(tuple(forms))
+
         return (
             route_counts,
             tuple(route_probabilities),
             tuple(route_forms),
-            tuple(route_times),
+            form_times,
         )
-
-    @staticmethod
-    def _matrix_row(cells: list[str], label: str) -> tuple[str, ...]:
-        last_filled = max(
-            (index for index, value in enumerate(cells) if value),
-            default=-1,
-        )
-        if last_filled < 0:
-            raise ValueError(f"Заполните {label}.")
-        values = cells[:last_filled + 1]
-        if any(not value for value in values):
-            raise ValueError(f"{label.capitalize()} нужно заполнять слева направо без пропусков.")
-        return tuple(values)
 
     @staticmethod
     def _metric_card(parent, title: str, value: str, column: int):
@@ -749,15 +749,16 @@ class HumanMachineApp:
             if not selected_pi:
                 raise ValueError("Введите хотя бы одну вероятность ошибки Pi через запятую.")
             topic_probabilities = (float(self.lab1_topic_normal.get()), float(self.lab1_topic_recovery.get()))
+
+            bins_value = self.lab1_bins.get()
+            bins = None if bins_value == "Автоматически" else int(bins_value)
+
             (
                 route_counts,
                 route_probabilities,
                 route_forms,
-                route_times,
+                form_times,
             ) = self._get_lab1_route_data()
-
-            bins_value = self.lab1_bins.get()
-            bins = None if bins_value == "Автоматически" else int(bins_value)
 
             config = Lab1Config(
                 n_simulations=n_simulations,
@@ -767,7 +768,7 @@ class HumanMachineApp:
                 route_counts=route_counts,
                 route_probabilities=route_probabilities,
                 route_forms=route_forms,
-                route_times=route_times,
+                form_times=form_times,
                 error_strategy=self.lab1_error_strategy.get(),
             )
 
@@ -903,10 +904,9 @@ class HumanMachineApp:
                 route_counts,
                 route_probabilities,
                 route_forms,
-                route_times,
+                form_times,
             ) = self._get_lab1_route_data()
 
-            # Для ЛР2 используются те же маршруты диалога, что и в ЛР1.
             route_config = Lab1Config(
                 n_simulations=1,
                 seed=config.seed,
@@ -918,7 +918,7 @@ class HumanMachineApp:
                 route_counts=route_counts,
                 route_probabilities=route_probabilities,
                 route_forms=route_forms,
-                route_times=route_times,
+                form_times=form_times,
             )
             routes = generate_routes(route_config)
 
@@ -1032,6 +1032,17 @@ class HumanMachineApp:
         }
         for variable, value in defaults.items():
             variable.set(value)
+
+        for i, (name_var, time_var) in enumerate(
+            zip(self.lab1_form_name_vars, self.lab1_form_time_vars)
+        ):
+            if i < 2:
+                name_var.set(f"Экран {i + 1}")
+                time_var.set(str(i + 2))
+            else:
+                name_var.set("")
+                time_var.set("")
+
         for variable in self.lab1_route_counts:
             variable.set("2")
         for topic_index, values in enumerate(
@@ -1041,15 +1052,16 @@ class HumanMachineApp:
                 self.lab1_route_probability_vars[topic_index]
             ):
                 variable.set(values[index] if index < len(values) else "0")
+        
             for route_index in range(MAX_ROUTES_PER_TOPIC):
                 for step in range(MAX_ROUTE_STEPS):
-                    self.lab1_route_form_vars[topic_index][route_index][step].set(
-                        f"Экран {step + 1}" if step < 2 else ""
-                    )
-                    self.lab1_route_time_vars[topic_index][route_index][step].set(
-                        str(step + 2) if step < 2 else ""
-                    )
+                    var = self.lab1_route_form_vars[topic_index][route_index][step]
+                    if route_index < 2 and step < 2:
+                        var.set(f"Экран {step + 1}")
+                    else:
+                        var.set("")
             self._render_route_matrices(topic_index)
+
         self.lab1_metric_runs.configure(text="—")
         self.lab1_metric_mean.configure(text="—")
         self.lab1_metric_median.configure(text="—")

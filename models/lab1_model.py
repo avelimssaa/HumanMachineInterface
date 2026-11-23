@@ -32,8 +32,6 @@ ERROR_STRATEGIES = (
 
 @dataclass(frozen=True)
 class Lab1Config:
-    """Параметры генерации маршрутов и имитационного эксперимента."""
-
     n_simulations: int = 10_000
     seed: int = 42
     error_probabilities: tuple[float, ...] = (0.0, 0.3, 0.6, 0.9)
@@ -41,19 +39,16 @@ class Lab1Config:
     route_counts: tuple[int, int] = (2, 2)
     route_probabilities: tuple[float, ...] = (0.6, 0.4, 0.7, 0.3)
     route_forms: tuple[tuple[str, ...], ...] = ()
-    route_times: tuple[tuple[float, ...], ...] = ()
+    form_times: tuple[tuple[str, float], ...] = ()
     error_strategy: str = REPEAT_STEP
 
 
 def validate_config(config: Lab1Config) -> None:
-    """Проверяет корректность параметров модели."""
-
     if config.n_simulations <= 0:
         raise ValueError("Количество имитаций должно быть положительным.")
 
     if len(config.route_counts) != 2 or any(
-        not isinstance(count, int)
-        or not 1 <= count <= MAX_ROUTES_PER_TOPIC
+        not isinstance(count, int) or not 1 <= count <= MAX_ROUTES_PER_TOPIC
         for count in config.route_counts
     ):
         raise ValueError(
@@ -61,32 +56,38 @@ def validate_config(config: Lab1Config) -> None:
         )
 
     route_total = sum(config.route_counts)
-    if bool(config.route_forms) != bool(config.route_times):
-        raise ValueError("Нужно задать обе матрицы: экранные формы и время.")
-    if config.route_forms and (
-        len(config.route_forms) != route_total
-        or len(config.route_times) != route_total
-    ):
-        raise ValueError("Матрицы форм и времени должны содержать строку для каждого маршрута.")
 
-    for forms, times in zip(config.route_forms, config.route_times):
-        if not 1 <= len(forms) <= MAX_ROUTE_STEPS:
+    if not 2 <= len(config.form_times) <= MAX_ROUTE_STEPS:
+        raise ValueError(
+            f"Справочник экранных форм должен содержать от 2 до {MAX_ROUTE_STEPS} записей."
+        )
+    form_names = [name for name, _ in config.form_times]
+    if len(set(form_names)) != len(form_names):
+        raise ValueError("Имена экранных форм в справочнике не должны повторяться.")
+    if any(not name.strip() for name in form_names):
+        raise ValueError("Имя экранной формы не может быть пустым.")
+    if any(
+        not isinstance(t, (int, float)) or not isfinite(t) or t <= 0
+        for _, t in config.form_times
+    ):
+        raise ValueError("Время каждой экранной формы должно быть числом больше 0.")
+    form_time_map = dict(config.form_times)
+
+    if len(config.route_forms) != route_total:
+        raise ValueError("Матрица маршрутов должна содержать строку для каждого маршрута.")
+
+    for route_forms in config.route_forms:
+        if not 1 <= len(route_forms) <= MAX_ROUTE_STEPS:
             raise ValueError(
                 f"В маршруте должно быть от 1 до {MAX_ROUTE_STEPS} экранных форм."
             )
-        if len(forms) != len(times):
-            raise ValueError(
-                "Число экранных форм и времён в строке маршрута должно совпадать."
-            )
-        if any(not isinstance(form, str) or not form.strip() for form in forms):
-            raise ValueError("Название каждой экранной формы не может быть пустым.")
-        if any(
-            not isinstance(duration, (int, float))
-            or not isfinite(duration)
-            or duration <= 0
-            for duration in times
-        ):
-            raise ValueError("Время каждой экранной формы должно быть числом больше 0.")
+        for form in route_forms:
+            if not isinstance(form, str) or not form.strip():
+                raise ValueError("Название каждой экранной формы не может быть пустым.")
+            if form not in form_time_map:
+                raise ValueError(
+                    f"Экранная форма «{form}» не описана в справочнике времён."
+                )
 
     if config.error_strategy not in ERROR_STRATEGIES:
         raise ValueError("Неизвестная стратегия обработки ошибок.")
@@ -119,34 +120,31 @@ def validate_config(config: Lab1Config) -> None:
     if not np.isclose(sum(config.route_probabilities[normal_count:]), 1.0):
         raise ValueError("Сумма вероятностей маршрутов восстановления должна равняться 1.")
 
-
 def generate_routes(config: Lab1Config) -> dict[str, list[dict[str, Any]]]:
     """
-    Создаёт маршруты из матриц последовательностей экранных форм и времени.
+    Создаёт маршруты из матрицы последовательностей экранных форм.
+    Время шага маршрута берётся из общего справочника form_times.
     """
-
     validate_config(config)
-
+    form_time_map = dict(config.form_times)
     normal_count, recovery_count = config.route_counts
-    default_forms = ("Экран 1", "Экран 2")
-    default_times = (2.0, 3.0)
-    route_forms = config.route_forms or (default_forms,) * (normal_count + recovery_count)
-    route_times = config.route_times or (default_times,) * (normal_count + recovery_count)
     topics = (
         (NORMAL_TOPIC, "A", normal_count, 0),
         (RECOVERY_TOPIC, "B", recovery_count, normal_count),
     )
     routes = {}
     for topic, prefix, count, start_index in topics:
-        routes[topic] = [
-            {
+        routes[topic] = []
+        for route_index in range(count):
+            forms = list(config.route_forms[start_index + route_index])
+            # время каждого шага — из справочника
+            times = [form_time_map[form] for form in forms]
+            routes[topic].append({
                 "name": f"{prefix}{route_index + 1}",
-                "forms": list(route_forms[start_index + route_index]),
-                "times": list(route_times[start_index + route_index]),
+                "forms": forms,
+                "times": times,
                 "probability": config.route_probabilities[start_index + route_index],
-            }
-            for route_index in range(count)
-        ]
+            })
     return routes
 
 
