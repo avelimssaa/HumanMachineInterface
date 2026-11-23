@@ -34,7 +34,6 @@ class Lab2Config:
     error_probabilities: tuple[float, ...] = (0.1,)
     failure_distribution: str = "Экспоненциальный"
     seed: int = 42
-    error_strategy: str = REPEAT_STEP
 
 
 def validate_lab2_config(config: Lab2Config) -> None:
@@ -54,8 +53,8 @@ def validate_lab2_config(config: Lab2Config) -> None:
         raise ValueError("Вероятности ошибки Pi должны находиться в диапазоне [0, 1).")
     if config.failure_distribution not in ("Экспоненциальный", "Равномерный", "Нормальный"):
         raise ValueError("Неизвестный закон распределения времени наработки на отказ.")
-    if config.error_strategy not in ERROR_STRATEGIES:
-        raise ValueError("Неизвестная стратегия обработки ошибок.")
+    # if config.error_strategy not in ERROR_STRATEGIES:
+    #     raise ValueError("Неизвестная стратегия обработки ошибок.")
 
 
 def _sample_failure_interval(config: Lab2Config, rng: np.random.Generator) -> float:
@@ -81,7 +80,7 @@ def _dialogue_time(
     routes: dict[str, list[dict[str, Any]]],
     error_probability: float,
     rng: np.random.Generator,
-    error_strategy: str,
+    error_strategy: str = REPEAT_STEP,
 ) -> float:
     """Время прохождения маршрута с выбранной стратегией обработки ошибок."""
     available = routes[topic]
@@ -117,7 +116,7 @@ def _simulate_one(
     downtime = 0.0
     is_up = True
 
-    queue: list[float] = []  # времена поступления ожидающих заявок
+    queue: list[float] = []
     active_arrival: float | None = None
     service_end = float("inf")
 
@@ -130,7 +129,7 @@ def _simulate_one(
             active_arrival = queue.pop(0)
             service_time = _dialogue_time(
                 NORMAL_TOPIC, routes, error_probability, rng,
-                config.error_strategy,
+                # config.error_strategy,
             )
             service_end = now + service_time
 
@@ -165,8 +164,7 @@ def _simulate_one(
             failures += 1
             is_up = False
             downtime_started = t
-            # По условию ЛР2 все ожидающие и обрабатываемая заявки задачи 1
-            # аннулируются в момент отказа.
+
             if active_arrival is not None:
                 total_delay += t - active_arrival
                 cancelled += 1
@@ -179,7 +177,7 @@ def _simulate_one(
 
             recovery_time = _dialogue_time(
                 RECOVERY_TOPIC, routes, error_probability, rng,
-                config.error_strategy,
+                # config.error_strategy,
             )
             repair_end = t + recovery_time
             next_failure = float("inf")
@@ -193,7 +191,6 @@ def _simulate_one(
             next_failure = t + _sample_failure_interval(config, rng)
             start_next_service(t)
 
-    # Учитываем простой, незавершённый диалог и очередь на момент окончания опыта.
     if not is_up and downtime_started is not None:
         downtime += horizon - downtime_started
     if active_arrival is not None:
