@@ -137,7 +137,7 @@ def generate_routes(config: Lab1Config) -> dict[str, list[dict[str, Any]]]:
         routes[topic] = []
         for route_index in range(count):
             forms = list(config.route_forms[start_index + route_index])
-            # время каждого шага — из справочника
+            
             times = [form_time_map[form] for form in forms]
             routes[topic].append({
                 "name": f"{prefix}{route_index + 1}",

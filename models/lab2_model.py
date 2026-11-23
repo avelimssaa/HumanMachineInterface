@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 
 from .lab1_model import (
-    ERROR_STRATEGIES,
     NORMAL_TOPIC,
     RECOVERY_TOPIC,
     REPEAT_STEP,
@@ -53,8 +52,6 @@ def validate_lab2_config(config: Lab2Config) -> None:
         raise ValueError("Вероятности ошибки Pi должны находиться в диапазоне [0, 1).")
     if config.failure_distribution not in ("Экспоненциальный", "Равномерный", "Нормальный"):
         raise ValueError("Неизвестный закон распределения времени наработки на отказ.")
-    # if config.error_strategy not in ERROR_STRATEGIES:
-    #     raise ValueError("Неизвестная стратегия обработки ошибок.")
 
 
 def _sample_failure_interval(config: Lab2Config, rng: np.random.Generator) -> float:
@@ -129,7 +126,6 @@ def _simulate_one(
             active_arrival = queue.pop(0)
             service_time = _dialogue_time(
                 NORMAL_TOPIC, routes, error_probability, rng,
-                # config.error_strategy,
             )
             service_end = now + service_time
 
@@ -177,7 +173,6 @@ def _simulate_one(
 
             recovery_time = _dialogue_time(
                 RECOVERY_TOPIC, routes, error_probability, rng,
-                # config.error_strategy,
             )
             repair_end = t + recovery_time
             next_failure = float("inf")

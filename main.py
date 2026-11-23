@@ -264,8 +264,6 @@ class HumanMachineApp:
             "Стратегия ошибок здесь применяется к моделированию ЛР1."
         ), wraplength=280, bootstyle="secondary").grid(row=row, column=0, sticky=W, pady=(14, 0))
 
-        #-------------------------------------------------------
-
         right = ttk.Frame(self.lab1_tab)
         right.grid(row=0, column=1, sticky=NSEW)
         right.columnconfigure(0, weight=1)
@@ -408,19 +406,6 @@ class HumanMachineApp:
             state="readonly",
         ).grid(row=row, column=0, sticky=EW)
         row += 1
-
-        # ttk.Label(parameters, text="Стратегия обработки ошибок", style="Section.TLabel").grid(
-        #     row=row, column=0, sticky=W, pady=(8, 4)
-        # )
-        # row += 1
-        # self.lab2_error_strategy = tk.StringVar(value=ERROR_STRATEGIES[0])
-        # ttk.Combobox(
-        #     parameters,
-        #     textvariable=self.lab2_error_strategy,
-        #     values=ERROR_STRATEGIES,
-        #     state="readonly",
-        # ).grid(row=row, column=0, sticky=EW)
-        # row += 1
 
         ttk.Separator(parameters).grid(row=row, column=0, sticky=EW, pady=12)
         row += 1
@@ -867,37 +852,6 @@ class HumanMachineApp:
         value_label.pack(anchor=W, pady=(5, 0))
         return value_label
 
-    # @staticmethod
-    # def create_tree(parent):
-    #     wrapper = ttk.Frame(parent)
-    #     wrapper.pack(fill=BOTH, expand=YES)
-    #     tree = tkttk.Treeview(wrapper, show="headings")
-    #     y_scroll = ttk.Scrollbar(wrapper, orient=VERTICAL, command=tree.yview)
-    #     x_scroll = ttk.Scrollbar(wrapper, orient=HORIZONTAL, command=tree.xview)
-    #     tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
-    #     tree.grid(row=0, column=0, sticky=NSEW)
-    #     y_scroll.grid(row=0, column=1, sticky=NS)
-    #     x_scroll.grid(row=1, column=0, sticky=EW)
-    #     wrapper.rowconfigure(0, weight=1)
-    #     wrapper.columnconfigure(0, weight=1)
-    #     return tree
-
-    # @staticmethod
-    # def _fill_tree(tree, dataframe) -> None:
-    #     tree.delete(*tree.get_children())
-    #     columns = list(dataframe.columns)
-    #     tree["columns"] = columns
-    #     for column in columns:
-    #         tree.heading(column, text=str(column))
-    #         tree.column(column, width=145, minwidth=90, anchor=CENTER, stretch=True)
-    #     for row in dataframe.itertuples(index=False, name=None):
-    #         values = []
-    #         for value in row:
-    #             if isinstance(value, list):
-    #                 value = ", ".join(map(str, value))
-    #             values.append(value)
-    #         tree.insert("", END, values=values)
-
     def _run_lab1(self) -> None:
         try:
             n_simulations = int(self.lab1_runs.get())
@@ -1014,7 +968,6 @@ class HumanMachineApp:
                 error_probabilities=self._get_lab2_pi_values(),
                 failure_distribution=self.lab2_distribution.get(),
                 seed=int(self.lab2_seed.get()),
-                # error_strategy=self.lab2_error_strategy.get(),
             )
 
             (
@@ -1408,7 +1361,6 @@ class Lab1ResultsWindow(tk.Toplevel):
         self._metric_card(metrics, "Среднее время решения", f"{overall_mean:.2f} с", 1)
         self._metric_card(metrics, "Медианное время", f"{overall_median:.2f} с", 2)
 
-        # Средние по подтемам
         normal_mean = topic_df.loc[topic_df["topic"] == "Штатная работа", "Среднее_время"].mean()
         recovery_mean = topic_df.loc[topic_df["topic"] == "Восстановление", "Среднее_время"].mean()
         self._metric_card(
@@ -1499,7 +1451,6 @@ class Lab1ResultsWindow(tk.Toplevel):
             hspace=0.55, wspace=0.28,
         )
 
-        # --- 1. Гистограммы по Pi ---
         for index, pi in enumerate(pi_values):
             row = index // 2
             col = index % 2
@@ -1511,7 +1462,6 @@ class Lab1ResultsWindow(tk.Toplevel):
             ax.set_ylabel("Частота")
             ax.grid(axis="y", alpha=0.25)
 
-        # --- 2. Среднее время решения задачи от Pi ---
         ax_mean = self._figure.add_subplot(grid[n_hist_rows, :])
         ax_mean.plot(
             summary_df["Pi"], summary_df["Среднее_время"],
@@ -1525,7 +1475,6 @@ class Lab1ResultsWindow(tk.Toplevel):
         ax_mean.set_ylabel("Среднее время, с")
         ax_mean.grid(True, alpha=0.25)
 
-        # --- 3. Среднее время по подтемам от Pi ---
         ax_topics = self._figure.add_subplot(grid[n_hist_rows + 1, :])
         for topic, marker, color in (
             ("Штатная работа", "o", "tab:blue"),
@@ -1621,10 +1570,6 @@ class Lab2ResultsWindow(tk.Toplevel):
         notebook.add(runs_frame, text="Эксперименты")
         fill_tree(create_tree(runs_frame), self.result["runs_df"])
 
-        # pi_frame = ttk.Frame(notebook, padding=8)
-        # notebook.add(pi_frame, text="Потери L(Pi)")
-        # fill_tree(create_tree(pi_frame), self.result["pi_summary_df"])
-
         charts_frame = ttk.Frame(notebook, padding=8)
         notebook.add(charts_frame, text="Графики")
         self._figure = Figure(figsize=(11, 7), dpi=100, constrained_layout=True)
@@ -1637,10 +1582,6 @@ class Lab2ResultsWindow(tk.Toplevel):
         text.pack(fill=BOTH, expand=YES)
         text.insert("1.0", FORMULAS_TEXT)
         text.configure(state="disabled")
-
-    # @staticmethod
-    # def _fill_tree(tree, dataframe) -> None:
-    #     fill_tree(tree, dataframe)
 
     def _draw_charts(self) -> None:
         runs = self.result["runs_df"]
@@ -1692,41 +1633,6 @@ class Lab2ResultsWindow(tk.Toplevel):
         distribution_ax.grid(axis="y", alpha=0.25)
 
         self._canvas.draw()
-
-    # @staticmethod
-    # def create_tree(parent):
-    #     wrapper = ttk.Frame(parent)
-    #     wrapper.pack(fill=BOTH, expand=YES)
-    #     tree = tkttk.Treeview(wrapper, show="headings")
-    #     y_scroll = ttk.Scrollbar(wrapper, orient=VERTICAL, command=tree.yview)
-    #     x_scroll = ttk.Scrollbar(wrapper, orient=HORIZONTAL, command=tree.xview)
-    #     tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
-    #     tree.grid(row=0, column=0, sticky=NSEW)
-    #     y_scroll.grid(row=0, column=1, sticky=NS)
-    #     x_scroll.grid(row=1, column=0, sticky=EW)
-    #     wrapper.rowconfigure(0, weight=1)
-    #     wrapper.columnconfigure(0, weight=1)
-    #     return tree
-
-
-
-    # @staticmethod
-    # def _fill_tree(tree, dataframe) -> None:
-    #     tree.delete(*tree.get_children())
-    #     columns = list(dataframe.columns)
-    #     tree["columns"] = columns
-    #     for column in columns:
-    #         tree.heading(column, text=str(column))
-    #         tree.column(column, width=145, minwidth=90, anchor=CENTER, stretch=True)
-    #     for row in dataframe.itertuples(index=False, name=None):
-    #         values = []
-    #         for value in row:
-    #             if isinstance(value, list):
-    #                 value = ", ".join(map(str, value))
-    #             values.append(value)
-    #         tree.insert("", END, values=values)
-
-
 
 
 if __name__ == "__main__":
