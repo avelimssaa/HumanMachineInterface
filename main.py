@@ -643,30 +643,6 @@ class HumanMachineApp:
                 width=14,
             ).grid(row=2, column=i + 1, padx=3, pady=3)
 
-    @staticmethod
-    def _create_matrix_scroll_area(parent, row: int, column: int):
-        wrapper = ttk.Frame(parent)
-        wrapper.grid(row=row, column=column, sticky=NSEW)
-        wrapper.rowconfigure(0, weight=1)
-        wrapper.columnconfigure(0, weight=1)
-        canvas = tk.Canvas(wrapper, highlightthickness=0)
-        vertical_scroll = ttk.Scrollbar(wrapper, orient=VERTICAL, command=canvas.yview)
-        horizontal_scroll = ttk.Scrollbar(wrapper, orient=HORIZONTAL, command=canvas.xview)
-        canvas.configure(
-            yscrollcommand=vertical_scroll.set,
-            xscrollcommand=horizontal_scroll.set,
-        )
-        canvas.grid(row=0, column=0, sticky=NSEW)
-        vertical_scroll.grid(row=0, column=1, sticky=NS)
-        horizontal_scroll.grid(row=1, column=0, sticky=EW)
-        content = ttk.Frame(canvas)
-        canvas.create_window((0, 0), window=content, anchor="nw")
-        content.bind(
-            "<Configure>",
-            lambda _event: canvas.configure(scrollregion=canvas.bbox("all")),
-        )
-        return content, canvas
-
     def _render_route_matrices(
         self,
         topic_index: int,
@@ -842,15 +818,6 @@ class HumanMachineApp:
             tuple(route_forms),
             form_times,
         )
-
-    @staticmethod
-    def _metric_card(parent, title: str, value: str, column: int):
-        card = ttk.Frame(parent, padding=12, bootstyle="light")
-        card.grid(row=0, column=column, sticky=EW, padx=(0 if column == 0 else 8, 0))
-        ttk.Label(card, text=title, bootstyle="secondary").pack(anchor=W)
-        value_label = ttk.Label(card, text=value, style="Metric.TLabel")
-        value_label.pack(anchor=W, pady=(5, 0))
-        return value_label
 
     def _run_lab1(self) -> None:
         try:
