@@ -63,6 +63,7 @@ dmypy.json
 .project
 .pydevproject
 .settings/
+.vs/
 
 .DS_Store
 Thumbs.db

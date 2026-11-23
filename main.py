@@ -28,6 +28,8 @@ from models.lab1_model import (
 )
 from models.lab2_model import Lab2Config, run_lab2
 
+import json
+from tkinter import filedialog
 
 APP_TITLE = "Человеко-машинный интерфейс"
 APP_VERSION = "0.4.0"
@@ -117,20 +119,12 @@ class HumanMachineApp:
         self.lab1_tab.columnconfigure(1, weight=1)
         self.lab1_tab.rowconfigure(0, weight=1)
 
-        left = ttk.Frame(self.lab1_tab)
-        left.grid(row=0, column=0, sticky=NSEW, padx=(0, 12))
-        left.rowconfigure(0, weight=1)
-        left.columnconfigure(0, weight=1)
-        parameter_canvas = tk.Canvas(left, highlightthickness=0, width=330)
-        parameter_scroll = ttk.Scrollbar(left, orient=VERTICAL, command=parameter_canvas.yview)
-        parameter_canvas.configure(yscrollcommand=parameter_scroll.set)
-        parameter_canvas.grid(row=0, column=0, sticky=NSEW)
-        parameter_scroll.grid(row=0, column=1, sticky=NS)
-        parameters = ttk.Labelframe(parameter_canvas, text="Параметры моделирования", padding=14)
-        parameter_window = parameter_canvas.create_window((0, 0), window=parameters, anchor="nw")
-        parameters.bind("<Configure>", lambda _e: parameter_canvas.configure(scrollregion=parameter_canvas.bbox("all")))
-        parameter_canvas.bind("<Configure>", lambda e: parameter_canvas.itemconfigure(parameter_window, width=e.width))
-        parameter_canvas.bind_all("<MouseWheel>", lambda e: parameter_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        parameters = ttk.Labelframe(
+            self.lab1_tab,
+            text="Параметры моделирования",
+            padding=14,
+        )
+        parameters.grid(row=0, column=0, sticky=NSEW, padx=(0, 12))
         parameters.columnconfigure(0, weight=1)
 
         results = ttk.Frame(self.lab1_tab)
@@ -189,19 +183,6 @@ class HumanMachineApp:
             self._add_entry(parameters, label, variable, row)
             row += 2
 
-        ttk.Separator(parameters).grid(row=row, column=0, sticky=EW, pady=12)
-        row += 1
-        ttk.Label(parameters, text="Вероятности выбора тем", style="Section.TLabel").grid(
-            row=row, column=0, sticky=W, pady=(0, 4)
-        )
-        row += 1
-        for label, variable in [
-            ("Штатная работа", self.lab1_topic_normal),
-            ("Восстановление", self.lab1_topic_recovery),
-        ]:
-            self._add_entry(parameters, f"Вероятность темы «{label}»", variable, row)
-            row += 2
-
         ttk.Label(parameters, text="Стратегия обработки ошибок", style="Section.TLabel").grid(
             row=row, column=0, sticky=W, pady=(8, 4)
         )
@@ -232,87 +213,54 @@ class HumanMachineApp:
         ttk.Button(parameters, text="Сбросить параметры", bootstyle="secondary-outline",
                    command=self._reset_lab1).grid(row=row, column=0, sticky=EW, pady=(8, 0))
         row += 1
+
+        btn_save = ttk.Button(
+            parameters, text="Сохранить конфигурацию", bootstyle="info-outline",
+            command=self._save_lab1_config,
+        )
+        btn_save.grid(row=row, column=0, sticky=EW, pady=(8, 0))
+        row += 1
+        btn_load = ttk.Button(
+            parameters, text="Загрузить конфигурацию", bootstyle="info-outline",
+            command=self._load_lab1_config,
+        )
+        btn_load.grid(row=row, column=0, sticky=EW, pady=(8, 0))
+        row += 1
+
         ttk.Label(parameters, text=(
             "Матрицы маршрутов задаются во вкладке результатов «Матрицы маршрутов». "
             "Стратегия ошибок здесь применяется к моделированию ЛР1."
         ), wraplength=280, bootstyle="secondary").grid(row=row, column=0, sticky=W, pady=(14, 0))
 
-        ttk.Label(results, text="Результаты эксперимента", style="Section.TLabel").grid(
-            row=0, column=0, sticky=W, pady=(0, 10)
-        )
-        metrics = ttk.Frame(results)
-        metrics.grid(row=1, column=0, sticky=EW)
-        for col in range(3):
-            metrics.columnconfigure(col, weight=1)
-        self.lab1_metric_runs = self._metric_card(metrics, "Эксперименты", "—", 0)
-        self.lab1_metric_mean = self._metric_card(metrics, "Среднее время", "—", 1)
-        self.lab1_metric_median = self._metric_card(metrics, "Медианное время", "—", 2)
+        #-------------------------------------------------------
 
-        output = ttk.Notebook(results)
-        output.grid(row=2, column=0, sticky=NSEW, pady=(14, 0))
-        self.lab1_summary_frame = ttk.Frame(output, padding=8)
-        self.lab1_routes_frame = ttk.Frame(output, padding=8)
-        self.lab1_charts_frame = ttk.Frame(output, padding=8)
-        self.lab1_matrices_frame = ttk.Frame(output, padding=8)
-        output.add(self.lab1_summary_frame, text="Сводная таблица")
-        output.add(self.lab1_routes_frame, text="Маршруты")
-        output.add(self.lab1_charts_frame, text="Графики")
-        output.add(self.lab1_matrices_frame, text="Матрицы маршрутов")
-        self.lab1_summary_tree = self._create_tree(self.lab1_summary_frame)
-        self.lab1_routes_tree = self._create_tree(self.lab1_routes_frame)
-        self._build_route_matrix_editor(self.lab1_matrices_frame)
-        # Прокручиваемая область для крупных графиков.
-        plot_container = ttk.Frame(self.lab1_charts_frame)
-        plot_container.pack(fill=BOTH, expand=YES)
-        plot_container.rowconfigure(0, weight=1)
-        plot_container.columnconfigure(0, weight=1)
+        right = ttk.Frame(self.lab1_tab)
+        right.grid(row=0, column=1, sticky=NSEW)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
 
-        self.lab1_plot_view = tk.Canvas(plot_container, highlightthickness=0)
-        self.lab1_plot_vscroll = ttk.Scrollbar(
-            plot_container, orient=VERTICAL, command=self.lab1_plot_view.yview
+        matrices_frame = ttk.Labelframe(
+            right, text="Матрицы маршрутов", padding=8
         )
-        self.lab1_plot_hscroll = ttk.Scrollbar(
-            plot_container, orient=HORIZONTAL, command=self.lab1_plot_view.xview
-        )
-        self.lab1_plot_view.configure(
-            yscrollcommand=self.lab1_plot_vscroll.set,
-            xscrollcommand=self.lab1_plot_hscroll.set,
-        )
-        self.lab1_plot_view.grid(row=0, column=0, sticky=NSEW)
-        self.lab1_plot_vscroll.grid(row=0, column=1, sticky=NS)
-        self.lab1_plot_hscroll.grid(row=1, column=0, sticky=EW)
+        matrices_frame.grid(row=0, column=0, sticky=NSEW)
+        matrices_frame.columnconfigure(0, weight=1)
+        matrices_frame.rowconfigure(0, weight=1)
+        self._build_route_matrix_editor(matrices_frame)
 
-        self.lab1_plot_inner = ttk.Frame(self.lab1_plot_view)
-        self.lab1_plot_window = self.lab1_plot_view.create_window(
-            (0, 0), window=self.lab1_plot_inner, anchor="nw"
+        self.lab1_show_results_btn = ttk.Button(
+            right,
+            text="Показать результаты эксперимента",
+            bootstyle="secondary-outline",
+            command=self._show_lab1_results,
+            state="disabled",
         )
-        self.lab1_plot_inner.bind(
-            "<Configure>",
-            lambda _event: self.lab1_plot_view.configure(
-                scrollregion=self.lab1_plot_view.bbox("all")
-            ),
-        )
-        self.lab1_plot_view.bind(
-            "<MouseWheel>",
-            lambda event: self.lab1_plot_view.yview_scroll(
-                int(-event.delta / 120), "units"
-            ),
-        )
-
-        self.lab1_figure = Figure(figsize=(12, 7), dpi=100)
-        self.lab1_canvas = FigureCanvasTkAgg(
-            self.lab1_figure, master=self.lab1_plot_inner
-        )
-        self.lab1_canvas_widget = self.lab1_canvas.get_tk_widget()
-        self.lab1_canvas_widget.pack(anchor="nw")
-        self._draw_empty_lab1_charts()
+        self.lab1_show_results_btn.grid(row=1, column=0, sticky=EW, pady=(10, 0), ipady=5)
 
     def _build_lab2_tab(self) -> None:
         self.lab2_tab.columnconfigure(0, weight=0, minsize=330)
         self.lab2_tab.columnconfigure(1, weight=1)
         self.lab2_tab.rowconfigure(0, weight=1)
 
-        # Панель параметров ЛР2 прокручивается по вертикали.
         left = ttk.Frame(self.lab2_tab)
         left.grid(row=0, column=0, sticky=NSEW, padx=(0, 12))
         left.rowconfigure(0, weight=1)
@@ -475,84 +423,167 @@ class HumanMachineApp:
         ttk.Entry(parent, textvariable=variable).grid(row=row + 1, column=0, sticky=EW)
 
     def _build_route_matrix_editor(self, parent) -> None:
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(2, weight=1)
+
         ttk.Label(
             parent,
-            text=(
-                "Справочник экранных форм задаёт время каждой формы. "
-                "Матрица маршрутов показывает, какие формы входят в маршрут. "
-                "Время маршрута — сумма времён его форм из справочника."
-            ),
-            wraplength=900,
-            bootstyle="secondary",
-        ).pack(anchor=W, pady=(0, 8))
-
-        dictionary_frame = ttk.Labelframe(
-            parent, text="Справочник экранных форм", padding=8
+            text="Справочник экранных форм (общий для всех подтем, форма → время)",
+            style="Section.TLabel",
+        ).grid(row=0, column=0, sticky=W, pady=(0, 2))
+        forms_content, forms_canvas = self._create_h_scroll_area(
+            parent, row=1, column=0, height=140
         )
-        dictionary_frame.pack(fill=X, pady=(0, 8))
-        ttk.Label(dictionary_frame, text="Экранная форма").grid(
-            row=0, column=0, padx=4, pady=2
-        )
-        ttk.Label(dictionary_frame, text="Время, с").grid(
-            row=0, column=1, padx=4, pady=2
-        )
-        for i in range(MAX_ROUTE_STEPS):
-            ttk.Entry(
-                dictionary_frame,
-                textvariable=self.lab1_form_name_vars[i],
-                width=18,
-            ).grid(row=i + 1, column=0, padx=4, pady=1)
-            ttk.Entry(
-                dictionary_frame,
-                textvariable=self.lab1_form_time_vars[i],
-                width=10,
-            ).grid(row=i + 1, column=1, padx=4, pady=1)
+        self._render_form_dictionary(forms_content)
 
         topic_notebook = ttk.Notebook(parent)
-        topic_notebook.pack(fill=BOTH, expand=YES)
+        topic_notebook.grid(row=2, column=0, sticky=NSEW, pady=(8, 0))
         self.lab1_route_matrix_frames = []
 
-        for topic_index, (topic, prefix) in enumerate(
-            (("Штатная работа", "A"), ("Восстановление", "B"))
+        for topic_index, (topic, prefix, topic_var) in enumerate(
+            (
+                ("Штатная работа", "A", self.lab1_topic_normal),
+                ("Восстановление", "B", self.lab1_topic_recovery),
+            )
         ):
             topic_page = ttk.Frame(topic_notebook, padding=8)
             topic_notebook.add(topic_page, text=topic)
             topic_page.columnconfigure(0, weight=1)
+            topic_page.rowconfigure(3, weight=1)
 
-            ttk.Label(topic_page, text="Количество маршрутов (1–10)").grid(
-                row=0, column=0, sticky=W, pady=(0, 3)
+            header = ttk.Frame(topic_page)
+            header.grid(row=0, column=0, sticky=EW, pady=(0, 6))
+            header.columnconfigure(0, weight=1)
+            ttk.Label(
+                header, text=f"Подтема «{topic}»", style="Section.TLabel"
+            ).grid(row=0, column=0, sticky=W)
+            prob = ttk.Frame(header)
+            prob.grid(row=1, column=0, sticky=W, pady=(4, 0))
+            ttk.Label(prob, text="Вероятность выбора подтемы:").pack(side=LEFT)
+            ttk.Entry(prob, textvariable=topic_var, width=10).pack(
+                side=LEFT, padx=(6, 0)
             )
-            count_selector = ttk.Combobox(
-                topic_page,
+
+            counts = ttk.Frame(topic_page)
+            counts.grid(row=1, column=0, sticky=EW, pady=(0, 4))
+            ttk.Label(counts, text="Количество маршрутов (1–10):").pack(side=LEFT)
+            selector = ttk.Combobox(
+                counts,
                 textvariable=self.lab1_route_counts[topic_index],
                 values=tuple(str(v) for v in range(1, MAX_ROUTES_PER_TOPIC + 1)),
-                state="readonly",
-                width=8,
+                state="readonly", width=6,
             )
-            count_selector.grid(row=1, column=0, sticky=W)
-            count_selector.bind(
+            selector.pack(side=LEFT, padx=(6, 0))
+            selector.bind(
                 "<<ComboboxSelected>>",
-                lambda _event, index=topic_index: self._on_route_count_changed(index),
+                lambda _e, idx=topic_index: self._on_route_count_changed(idx),
             )
 
-            matrix_content = self._create_matrix_scroll_area(topic_page, row=2, column=0)
-            topic_page.rowconfigure(2, weight=1)
-            self.lab1_route_matrix_frames.append((matrix_content, prefix))
+            ttk.Label(
+                topic_page,
+                text="Матрица маршрутов (столбцы — маршруты, строки — шаги)",
+                style="Section.TLabel",
+            ).grid(row=2, column=0, sticky=W, pady=(8, 2))
+            matrix_content, matrix_canvas = self._create_scroll_area(
+                topic_page, row=3, column=0, height=280
+            )
+            self.lab1_route_matrix_frames.append((matrix_content, prefix, matrix_canvas))
             self._render_route_matrices(topic_index)
+
+    @staticmethod
+    def _create_h_scroll_area(parent, row: int, column: int, height: int = 200):
+        wrapper = ttk.Frame(parent)
+        wrapper.grid(row=row, column=column, sticky=NSEW)
+        wrapper.rowconfigure(0, weight=1)
+        wrapper.columnconfigure(0, weight=1)
+        canvas = tk.Canvas(wrapper, highlightthickness=0, height=height, background="white")
+        h_scroll = ttk.Scrollbar(wrapper, orient=HORIZONTAL, command=canvas.xview)
+        canvas.configure(xscrollcommand=h_scroll.set)
+        canvas.grid(row=0, column=0, sticky=NSEW)
+        h_scroll.grid(row=1, column=0, sticky=EW)
+        content = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind(
+            "<Configure>",
+            lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        return content, canvas
+
+    @staticmethod
+    def _create_scroll_area(parent, row: int, column: int, height: int = 200):
+        wrapper = ttk.Frame(parent)
+        wrapper.grid(row=row, column=column, sticky=NSEW)
+        wrapper.rowconfigure(0, weight=1)
+        wrapper.columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(
+            wrapper, highlightthickness=0, height=height, background="white"
+        )
+        v_scroll = ttk.Scrollbar(wrapper, orient=VERTICAL, command=canvas.yview)
+        h_scroll = ttk.Scrollbar(wrapper, orient=HORIZONTAL, command=canvas.xview)
+        canvas.configure(
+            yscrollcommand=v_scroll.set,
+            xscrollcommand=h_scroll.set,
+        )
+        canvas.grid(row=0, column=0, sticky=NSEW)
+        v_scroll.grid(row=0, column=1, sticky=NS)
+        h_scroll.grid(row=1, column=0, sticky=EW)
+
+        content = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind(
+            "<Configure>",
+            lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+
+        canvas.bind(
+            "<MouseWheel>",
+            lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"),
+        )
+        canvas.bind(
+            "<Shift-MouseWheel>",
+            lambda e: canvas.xview_scroll(int(-e.delta / 120), "units"),
+        )
+
+        return content, canvas
+
+    def _render_form_dictionary(self, frame) -> None:
+        for child in frame.winfo_children():
+            child.destroy()
+
+        ttk.Label(frame, text="Экран", style="Section.TLabel").grid(
+            row=0, column=0, padx=3, pady=3, sticky=W
+        )
+        for i in range(MAX_ROUTE_STEPS):
+            ttk.Label(frame, text=f"#{i + 1}").grid(
+                row=0, column=i + 1, padx=3, pady=3
+            )
+
+        ttk.Label(frame, text="Форма").grid(row=1, column=0, padx=3, pady=3, sticky=W)
+        for i in range(MAX_ROUTE_STEPS):
+            ttk.Entry(
+                frame,
+                textvariable=self.lab1_form_name_vars[i],
+                width=14,
+            ).grid(row=1, column=i + 1, padx=3, pady=3)
+
+        ttk.Label(frame, text="Время, с").grid(row=2, column=0, padx=3, pady=3, sticky=W)
+        for i in range(MAX_ROUTE_STEPS):
+            ttk.Entry(
+                frame,
+                textvariable=self.lab1_form_time_vars[i],
+                width=14,
+            ).grid(row=2, column=i + 1, padx=3, pady=3)
 
     @staticmethod
     def _create_matrix_scroll_area(parent, row: int, column: int):
         wrapper = ttk.Frame(parent)
-        wrapper.grid(row=row, column=column, sticky=NSEW)   # ← grid, не pack
+        wrapper.grid(row=row, column=column, sticky=NSEW)
         wrapper.rowconfigure(0, weight=1)
         wrapper.columnconfigure(0, weight=1)
         canvas = tk.Canvas(wrapper, highlightthickness=0)
-        vertical_scroll = ttk.Scrollbar(
-            wrapper, orient=VERTICAL, command=canvas.yview
-        )
-        horizontal_scroll = ttk.Scrollbar(
-            wrapper, orient=HORIZONTAL, command=canvas.xview
-        )
+        vertical_scroll = ttk.Scrollbar(wrapper, orient=VERTICAL, command=canvas.yview)
+        horizontal_scroll = ttk.Scrollbar(wrapper, orient=HORIZONTAL, command=canvas.xview)
         canvas.configure(
             yscrollcommand=vertical_scroll.set,
             xscrollcommand=horizontal_scroll.set,
@@ -566,39 +597,49 @@ class HumanMachineApp:
             "<Configure>",
             lambda _event: canvas.configure(scrollregion=canvas.bbox("all")),
         )
-        return content
+        return content, canvas
 
     def _render_route_matrices(self, topic_index: int) -> None:
-        matrix_frame, prefix = self.lab1_route_matrix_frames[topic_index]
+        matrix_frame, prefix, matrix_canvas = self.lab1_route_matrix_frames[topic_index]
         for child in matrix_frame.winfo_children():
             child.destroy()
 
-        ttk.Label(matrix_frame, text="Маршрут").grid(
-            row=0, column=0, padx=3, pady=3
-        )
-        ttk.Label(matrix_frame, text="P").grid(row=0, column=1, padx=3, pady=3)
-        for step in range(MAX_ROUTE_STEPS):
-            ttk.Label(matrix_frame, text=f"Шаг {step + 1}").grid(
-                row=0, column=step + 2, padx=3, pady=3
-            )
-
         route_count = int(self.lab1_route_counts[topic_index].get())
+
+        ttk.Label(matrix_frame, text="Маршрут", style="Section.TLabel").grid(
+            row=0, column=0, padx=3, pady=3, sticky=W
+        )
+        ttk.Label(matrix_frame, text="P", style="Section.TLabel").grid(
+            row=0, column=1, padx=3, pady=3
+        )
+        for step in range(MAX_ROUTE_STEPS):
+            ttk.Label(
+                matrix_frame, text=f"Шаг {step + 1}", style="Section.TLabel"
+            ).grid(row=0, column=step + 2, padx=3, pady=3)
+
         for route_index in range(route_count):
             row = route_index + 1
-            ttk.Label(matrix_frame, text=f"{prefix}{route_index + 1}").grid(
-                row=row, column=0, padx=3, pady=3
-            )
+            ttk.Label(
+                matrix_frame,
+                text=f"{prefix}{route_index + 1}",
+                style="Section.TLabel",
+            ).grid(row=row, column=0, padx=3, pady=3, sticky=W)
+
             ttk.Entry(
                 matrix_frame,
                 textvariable=self.lab1_route_probability_vars[topic_index][route_index],
                 width=9,
             ).grid(row=row, column=1, padx=3, pady=3)
+
             for step in range(MAX_ROUTE_STEPS):
                 ttk.Entry(
                     matrix_frame,
                     textvariable=self.lab1_route_form_vars[topic_index][route_index][step],
-                    width=16,
+                    width=14,
                 ).grid(row=row, column=step + 2, padx=3, pady=3)
+
+        matrix_frame.update_idletasks()
+        matrix_canvas.configure(scrollregion=matrix_canvas.bbox("all"))
 
     def _on_route_count_changed(self, topic_index: int) -> None:
         route_count = int(self.lab1_route_counts[topic_index].get())
@@ -713,42 +754,21 @@ class HumanMachineApp:
                 values.append(value)
             tree.insert("", END, values=values)
 
-    def _draw_empty_lab1_charts(self) -> None:
-        self.lab1_figure.clear()
-        ax_hist = self.lab1_figure.add_subplot(1, 2, 1)
-        ax_mean = self.lab1_figure.add_subplot(1, 2, 2)
-        ax_hist.set_title("Распределение времени")
-        ax_hist.set_xlabel("Время, с")
-        ax_hist.set_ylabel("Частота")
-        ax_mean.set_title("Среднее время от Pi")
-        ax_mean.set_xlabel("Вероятность ошибки Pi")
-        ax_mean.set_ylabel("Среднее время, с")
-        self.lab1_figure.subplots_adjust(left=0.07, right=0.98, top=0.95, bottom=0.08)
-        self._sync_canvas_widget_size()
-        self.lab1_canvas.draw_idle()
-        self.lab1_canvas.draw()
-        self.lab1_canvas_widget.update_idletasks()
-        self.lab1_plot_view.configure(
-            scrollregion=(0, 0,
-                        self.lab1_canvas_widget.winfo_reqwidth(),
-                        self.lab1_canvas_widget.winfo_reqheight())
-        )
-
-
-    def _sync_canvas_widget_size(self) -> None:
-        """Явно выставляет размер Tk-виджета канваса из figsize*dpi."""
-        w = int(self.lab1_figure.get_figwidth() * self.lab1_figure.dpi)
-        h = int(self.lab1_figure.get_figheight() * self.lab1_figure.dpi)
-        self.lab1_canvas_widget.configure(width=w, height=h)
-
     def _run_lab1(self) -> None:
         try:
             n_simulations = int(self.lab1_runs.get())
             seed = int(self.lab1_seed.get())
-            selected_pi = tuple(float(x.strip()) for x in self.lab1_pi_text.get().split(",") if x.strip())
+            selected_pi = tuple(
+                float(x.strip())
+                for x in self.lab1_pi_text.get().split(",")
+                if x.strip()
+            )
             if not selected_pi:
                 raise ValueError("Введите хотя бы одну вероятность ошибки Pi через запятую.")
-            topic_probabilities = (float(self.lab1_topic_normal.get()), float(self.lab1_topic_recovery.get()))
+            topic_probabilities = (
+                float(self.lab1_topic_normal.get()),
+                float(self.lab1_topic_recovery.get()),
+            )
 
             bins_value = self.lab1_bins.get()
             bins = None if bins_value == "Автоматически" else int(bins_value)
@@ -777,24 +797,13 @@ class HumanMachineApp:
 
             result = run_lab1(config)
             self.lab1_result = result
-
-            # Пересчитываем число интервалов по выбранной настройке.
             histogram_bins = get_histogram_bins(n_simulations, bins)
 
-            self._fill_tree(self.lab1_summary_tree, result["summary_df"])
-            self._fill_tree(self.lab1_routes_tree, result["routes_df"])
-
-            results_df = result["results_df"]
-            mean_time = results_df["time"].mean()
-            median_time = results_df["time"].median()
-            self.lab1_metric_runs.configure(text=f"{len(results_df):,}".replace(",", " "))
-            self.lab1_metric_mean.configure(text=f"{mean_time:.2f} с")
-            self.lab1_metric_median.configure(text=f"{median_time:.2f} с")
-
-            self._draw_lab1_charts(result, histogram_bins)
+            Lab1ResultsWindow(self.root, result, histogram_bins)
+            self.lab1_show_results_btn.configure(state="normal")
             self.status_var.set(
                 f"ЛР №1 завершена: {n_simulations} имитаций для каждого Pi; "
-                f"всего {len(results_df)} наблюдений."
+                f"всего {len(result['results_df'])} наблюдений."
             )
 
         except (ValueError, TypeError) as exc:
@@ -808,61 +817,17 @@ class HumanMachineApp:
             )
             self.status_var.set("При моделировании произошла ошибка")
 
-
-    def _draw_lab1_charts(self, result, bins: int) -> None:
-        results_df = result["results_df"]
-        summary_df = result["summary_df"]
-
-        pi_values = sorted(results_df["Pi"].unique())
-        n_hist_rows = (len(pi_values) + 1) // 2
-        total_rows = n_hist_rows + 1
-
-        figure_height = max(7, n_hist_rows * 4.5 + 4.0)
-        self.lab1_figure.clear()
-        self.lab1_figure.set_size_inches(12, figure_height, forward=True)
-        self._sync_canvas_widget_size()
-        grid = self.lab1_figure.add_gridspec(
-            total_rows, 2, hspace=0.48, wspace=0.28
+    def _show_lab1_results(self) -> None:
+        if self.lab1_result is None:
+            return
+        bins_value = self.lab1_bins.get()
+        bins = None if bins_value == "Автоматически" else int(bins_value)
+        histogram_bins = get_histogram_bins(
+            self.lab1_result["results_df"]["Pi"].nunique()
+            and int(self.lab1_runs.get()),
+            bins,
         )
-
-        for index, pi in enumerate(pi_values):
-            row = index // 2
-            col = index % 2
-            ax = self.lab1_figure.add_subplot(grid[row, col])
-            sample = results_df.loc[results_df["Pi"] == pi, "time"]
-            ax.hist(sample, bins=bins, edgecolor="black", alpha=0.75)
-            ax.set_title(f"Время диалога при Pi = {pi:g}", fontsize=13, pad=10)
-            ax.set_xlabel("Время выполнения, с")
-            ax.set_ylabel("Частота")
-            ax.grid(axis="y", alpha=0.25)
-
-        ax_mean = self.lab1_figure.add_subplot(grid[n_hist_rows, :])
-        ax_mean.plot(
-            summary_df["Pi"],
-            summary_df["Среднее_время"],
-            marker="o",
-            linewidth=2.5,
-            markersize=7,
-        )
-        ax_mean.set_title(
-            "Влияние вероятности ошибки на среднее время", fontsize=14, pad=12
-        )
-        ax_mean.set_xlabel("Вероятность ошибки Pi")
-        ax_mean.set_ylabel("Среднее время, с")
-        ax_mean.grid(True, alpha=0.25)
-
-        self.lab1_figure.subplots_adjust(
-            left=0.07, right=0.98, top=0.95, bottom=0.06,
-            hspace=0.55, wspace=0.28,
-        )
-
-        self.lab1_canvas.draw()
-        self.lab1_plot_inner.update_idletasks()
-        w = self.lab1_canvas_widget.winfo_reqwidth()
-        h = self.lab1_canvas_widget.winfo_reqheight()
-        self.lab1_plot_view.configure(scrollregion=(0, 0, w, h))
-        self.lab1_plot_view.xview_moveto(0)
-        self.lab1_plot_view.yview_moveto(0)
+        Lab1ResultsWindow(self.root, self.lab1_result, histogram_bins)
 
     def _draw_empty_lab2_charts(self) -> None:
         self.lab2_ax_losses.clear()
@@ -1021,16 +986,16 @@ class HumanMachineApp:
         self.lab2_canvas.draw_idle()
 
     def _reset_lab1(self) -> None:
-        defaults = {
-            self.lab1_seed: "42",
-            self.lab1_runs: "10000",
-            self.lab1_pi_text: "0, 0.3, 0.6, 0.9",
-            self.lab1_topic_normal: "0.8",
-            self.lab1_topic_recovery: "0.2",
-            self.lab1_error_strategy: ERROR_STRATEGIES[0],
-            self.lab1_bins: "Автоматически",
-        }
-        for variable, value in defaults.items():
+        defaults = [
+            (self.lab1_seed, "42"),
+            (self.lab1_runs, "10000"),
+            (self.lab1_pi_text, "0, 0.3, 0.6, 0.9"),
+            (self.lab1_topic_normal, "0.8"),
+            (self.lab1_topic_recovery, "0.2"),
+            (self.lab1_error_strategy, ERROR_STRATEGIES[0]),
+            (self.lab1_bins, "Автоматически"),
+        ]
+        for variable, value in defaults:
             variable.set(value)
 
         for i, (name_var, time_var) in enumerate(
@@ -1052,7 +1017,7 @@ class HumanMachineApp:
                 self.lab1_route_probability_vars[topic_index]
             ):
                 variable.set(values[index] if index < len(values) else "0")
-        
+    
             for route_index in range(MAX_ROUTES_PER_TOPIC):
                 for step in range(MAX_ROUTE_STEPS):
                     var = self.lab1_route_form_vars[topic_index][route_index][step]
@@ -1062,13 +1027,8 @@ class HumanMachineApp:
                         var.set("")
             self._render_route_matrices(topic_index)
 
-        self.lab1_metric_runs.configure(text="—")
-        self.lab1_metric_mean.configure(text="—")
-        self.lab1_metric_median.configure(text="—")
-        self.lab1_summary_tree.delete(*self.lab1_summary_tree.get_children())
-        self.lab1_routes_tree.delete(*self.lab1_routes_tree.get_children())
         self.lab1_result = None
-        self._draw_empty_lab1_charts()
+        self.lab1_show_results_btn.configure(state="disabled")
         self.status_var.set("Параметры лабораторной №1 сброшены")
 
     def _reset_lab2(self) -> None:
@@ -1099,6 +1059,338 @@ class HumanMachineApp:
     def run(self) -> None:
         self.root.mainloop()
 
+    def _collect_lab1_ui_state(self) -> dict:
+        """Собирает текущее состояние UI в словарь для сохранения в JSON."""
+        return {
+            "version": 1,
+            "lab1_seed": self.lab1_seed.get(),
+            "lab1_runs": self.lab1_runs.get(),
+            "lab1_pi_text": self.lab1_pi_text.get(),
+            "lab1_topic_normal": self.lab1_topic_normal.get(),
+            "lab1_topic_recovery": self.lab1_topic_recovery.get(),
+            "lab1_error_strategy": self.lab1_error_strategy.get(),
+            "lab1_bins": self.lab1_bins.get(),
+            "lab1_route_counts": [var.get() for var in self.lab1_route_counts],
+            "lab1_route_probabilities": [
+                [var.get() for var in topic_vars]
+                for topic_vars in self.lab1_route_probability_vars
+            ],
+            "lab1_form_names": [var.get() for var in self.lab1_form_name_vars],
+            "lab1_form_times": [var.get() for var in self.lab1_form_time_vars],
+            "lab1_route_forms": [
+                [
+                    [var.get() for var in route_vars]
+                    for route_vars in topic_vars
+                ]
+                for topic_vars in self.lab1_route_form_vars
+            ],
+        }
+
+    def _apply_lab1_ui_state(self, state: dict) -> None:
+        """Применяет сохранённое состояние к UI."""
+        def set_var(var: tk.StringVar, key: str) -> None:
+            if key in state:
+                var.set(str(state[key]))
+
+        set_var(self.lab1_seed, "lab1_seed")
+        set_var(self.lab1_runs, "lab1_runs")
+        set_var(self.lab1_pi_text, "lab1_pi_text")
+        set_var(self.lab1_topic_normal, "lab1_topic_normal")
+        set_var(self.lab1_topic_recovery, "lab1_topic_recovery")
+        set_var(self.lab1_error_strategy, "lab1_error_strategy")
+        set_var(self.lab1_bins, "lab1_bins")
+
+        for var, value in zip(self.lab1_route_counts, state.get("lab1_route_counts", [])):
+            var.set(str(value))
+
+        for topic_vars, saved in zip(
+            self.lab1_route_probability_vars,
+            state.get("lab1_route_probabilities", []),
+        ):
+            for var, value in zip(topic_vars, saved):
+                var.set(str(value))
+
+        for var, value in zip(self.lab1_form_name_vars, state.get("lab1_form_names", [])):
+            var.set(str(value))
+        for var, value in zip(self.lab1_form_time_vars, state.get("lab1_form_times", [])):
+            var.set(str(value))
+
+        saved_forms = state.get("lab1_route_forms", [])
+        for topic_vars, saved_topic in zip(self.lab1_route_form_vars, saved_forms):
+            for route_vars, saved_route in zip(topic_vars, saved_topic):
+                for var, value in zip(route_vars, saved_route):
+                    var.set(str(value))
+
+        for topic_index in range(2):
+            self._render_route_matrices(topic_index)
+
+
+    def _save_lab1_config(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Сохранить конфигурацию ЛР1",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), ("Все файлы", "*.*")],
+        )
+        if not path:
+            return
+        state = self._collect_lab1_ui_state()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+            self.status_var.set(f"Конфигурация сохранена: {path}")
+        except OSError as exc:
+            messagebox.showerror("Ошибка сохранения", str(exc), parent=self.root)
+
+
+    def _load_lab1_config(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Загрузить конфигурацию ЛР1",
+            filetypes=[("JSON", "*.json"), ("Все файлы", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            messagebox.showerror("Ошибка загрузки", str(exc), parent=self.root)
+            return
+
+        try:
+            self._apply_lab1_ui_state(state)
+            self.status_var.set(f"Конфигурация загружена: {path}")
+        except Exception as exc:
+            messagebox.showerror("Ошибка применения", str(exc), parent=self.root)
+
+class Lab1ResultsWindow(tk.Toplevel):
+    """Отдельное окно с результатами ЛР1."""
+
+    def __init__(self, master, result, histogram_bins: int) -> None:
+        super().__init__(master)
+        self.title("ЛР №1 — Результаты моделирования")
+        self.geometry("1280x820")
+        self.minsize(1000, 650)
+        self.result = result
+        self.histogram_bins = histogram_bins
+
+        self._build_metrics_header()
+        self._build_notebook()
+        self._draw_charts()
+
+    def _build_metrics_header(self) -> None:
+        header = ttk.Frame(self, padding=(16, 12))
+        header.pack(fill=X)
+
+        results_df = self.result["results_df"]
+        summary_df = self.result["summary_df"]
+        topic_df = self.result["topic_summary_df"]
+
+        overall_mean = results_df["time"].mean()
+        overall_median = results_df["time"].median()
+
+        metrics = ttk.Frame(header)
+        metrics.pack(fill=X)
+        for col in range(4):
+            metrics.columnconfigure(col, weight=1)
+
+        self._metric_card(metrics, "Эксперименты", f"{len(results_df):,}".replace(",", " "), 0)
+        self._metric_card(metrics, "Среднее время решения", f"{overall_mean:.2f} с", 1)
+        self._metric_card(metrics, "Медианное время", f"{overall_median:.2f} с", 2)
+
+        # Средние по подтемам
+        normal_mean = topic_df.loc[topic_df["topic"] == "Штатная работа", "Среднее_время"].mean()
+        recovery_mean = topic_df.loc[topic_df["topic"] == "Восстановление", "Среднее_время"].mean()
+        self._metric_card(
+            metrics,
+            "Штатная работа / Восстановление",
+            f"{normal_mean:.2f} / {recovery_mean:.2f} с",
+            3,
+        )
+
+    @staticmethod
+    def _metric_card(parent, title: str, value: str, column: int):
+        card = ttk.Frame(parent, padding=12, bootstyle="light")
+        card.grid(row=0, column=column, sticky=EW, padx=(0 if column == 0 else 8, 0))
+        ttk.Label(card, text=title, bootstyle="secondary").pack(anchor=W)
+        ttk.Label(card, text=value, style="Metric.TLabel").pack(anchor=W, pady=(5, 0))
+
+    def _build_notebook(self) -> None:
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill=BOTH, expand=YES, padx=16, pady=(0, 16))
+
+        # 1. Сводная таблица
+        summary_frame = ttk.Frame(notebook, padding=8)
+        notebook.add(summary_frame, text="Сводная таблица")
+        tree = self._create_tree(summary_frame)
+        self._fill_tree(tree, self.result["summary_df"])
+
+        # 2. Подтемы
+        topic_frame = ttk.Frame(notebook, padding=8)
+        notebook.add(topic_frame, text="По подтемам")
+        tree = self._create_tree(topic_frame)
+        self._fill_tree(tree, self.result["topic_summary_df"])
+
+        # 3. Маршруты
+        routes_frame = ttk.Frame(notebook, padding=8)
+        notebook.add(routes_frame, text="Маршруты")
+        tree = self._create_tree(routes_frame)
+        self._fill_tree(tree, self.result["routes_df"])
+
+        # 4. Графики
+        charts_frame = ttk.Frame(notebook, padding=8)
+        notebook.add(charts_frame, text="Графики")
+        self._build_charts_frame(charts_frame)
+
+    def _build_charts_frame(self, parent) -> None:
+        
+        wrapper = ttk.Frame(parent)
+        wrapper.pack(fill=BOTH, expand=YES)
+        wrapper.rowconfigure(0, weight=1)
+        wrapper.columnconfigure(0, weight=1)
+
+        self._plot_view = tk.Canvas(wrapper, highlightthickness=0, background="white")
+        vscroll = ttk.Scrollbar(wrapper, orient=VERTICAL, command=self._plot_view.yview)
+        hscroll = ttk.Scrollbar(wrapper, orient=HORIZONTAL, command=self._plot_view.xview)
+        self._plot_view.configure(yscrollcommand=vscroll.set, xscrollcommand=hscroll.set)
+        self._plot_view.grid(row=0, column=0, sticky=NSEW)
+        vscroll.grid(row=0, column=1, sticky=NS)
+        hscroll.grid(row=1, column=0, sticky=EW)
+
+        self._plot_inner = ttk.Frame(self._plot_view)
+        self._plot_view.create_window((0, 0), window=self._plot_inner, anchor="nw")
+        self._plot_inner.bind(
+            "<Configure>",
+            lambda _e: self._plot_view.configure(scrollregion=self._plot_view.bbox("all")),
+        )
+        self._plot_view.bind(
+            "<MouseWheel>",
+            lambda e: self._plot_view.yview_scroll(int(-e.delta / 120), "units"),
+        )
+
+        self._figure = Figure(figsize=(12, 7), dpi=100)
+        self._canvas = FigureCanvasTkAgg(self._figure, master=self._plot_inner)
+        self._canvas_widget = self._canvas.get_tk_widget()
+        self._canvas_widget.pack(anchor="nw")
+
+    def _draw_charts(self) -> None:
+        results_df = self.result["results_df"]
+        summary_df = self.result["summary_df"]
+        topic_df = self.result["topic_summary_df"]
+
+        pi_values = sorted(results_df["Pi"].unique())
+        n_hist_rows = (len(pi_values) + 1) // 2
+        
+        total_rows = n_hist_rows + 2
+
+        figure_height = max(9, n_hist_rows * 4.5 + 8.0)
+        self._figure.clear()
+        self._figure.set_size_inches(12, figure_height, forward=True)
+        self._sync_canvas_size()
+        grid = self._figure.add_gridspec(
+            total_rows, 2,
+            height_ratios=[1.0] * n_hist_rows + [1.3, 1.3],
+            hspace=0.55, wspace=0.28,
+        )
+
+        # --- 1. Гистограммы по Pi ---
+        for index, pi in enumerate(pi_values):
+            row = index // 2
+            col = index % 2
+            ax = self._figure.add_subplot(grid[row, col])
+            sample = results_df.loc[results_df["Pi"] == pi, "time"]
+            ax.hist(sample, bins=self.histogram_bins, edgecolor="black", alpha=0.75)
+            ax.set_title(f"Время диалога при Pi = {pi:g}", fontsize=13, pad=10)
+            ax.set_xlabel("Время выполнения, с")
+            ax.set_ylabel("Частота")
+            ax.grid(axis="y", alpha=0.25)
+
+        # --- 2. Среднее время решения задачи от Pi ---
+        ax_mean = self._figure.add_subplot(grid[n_hist_rows, :])
+        ax_mean.plot(
+            summary_df["Pi"], summary_df["Среднее_время"],
+            marker="o", linewidth=2.5, markersize=7,
+        )
+        ax_mean.set_title(
+            "Среднее время решения задачи пользователем в зависимости от Pi",
+            fontsize=14, pad=12,
+        )
+        ax_mean.set_xlabel("Вероятность ошибки Pi")
+        ax_mean.set_ylabel("Среднее время, с")
+        ax_mean.grid(True, alpha=0.25)
+
+        # --- 3. Среднее время по подтемам от Pi ---
+        ax_topics = self._figure.add_subplot(grid[n_hist_rows + 1, :])
+        for topic, marker, color in (
+            ("Штатная работа", "o", "tab:blue"),
+            ("Восстановление", "s", "tab:orange"),
+        ):
+            subset = topic_df[topic_df["topic"] == topic].sort_values("Pi")
+            ax_topics.plot(
+                subset["Pi"], subset["Среднее_время"],
+                marker=marker, linewidth=2.5, markersize=7,
+                label=topic, color=color,
+            )
+        ax_topics.set_title(
+            "Среднее время выполнения каждой подтемы в зависимости от Pi",
+            fontsize=14, pad=12,
+        )
+        ax_topics.set_xlabel("Вероятность ошибки Pi")
+        ax_topics.set_ylabel("Среднее время, с")
+        ax_topics.grid(True, alpha=0.25)
+        ax_topics.legend(loc="best")
+
+        self._figure.subplots_adjust(
+            left=0.07, right=0.98, top=0.95, bottom=0.05,
+            hspace=0.55, wspace=0.28,
+        )
+
+        self._canvas.draw()
+        self._plot_inner.update_idletasks()
+        w = self._canvas_widget.winfo_reqwidth()
+        h = self._canvas_widget.winfo_reqheight()
+        self._plot_view.configure(scrollregion=(0, 0, w, h))
+        self._plot_view.xview_moveto(0)
+        self._plot_view.yview_moveto(0)
+
+    def _sync_canvas_size(self) -> None:
+        w = int(self._figure.get_figwidth() * self._figure.dpi)
+        h = int(self._figure.get_figheight() * self._figure.dpi)
+        self._canvas_widget.configure(width=w, height=h)
+
+    @staticmethod
+    def _create_tree(parent):
+        wrapper = ttk.Frame(parent)
+        wrapper.pack(fill=BOTH, expand=YES)
+        tree = tkttk.Treeview(wrapper, show="headings")
+        y_scroll = ttk.Scrollbar(wrapper, orient=VERTICAL, command=tree.yview)
+        x_scroll = ttk.Scrollbar(wrapper, orient=HORIZONTAL, command=tree.xview)
+        tree.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+        tree.grid(row=0, column=0, sticky=NSEW)
+        y_scroll.grid(row=0, column=1, sticky=NS)
+        x_scroll.grid(row=1, column=0, sticky=EW)
+        wrapper.rowconfigure(0, weight=1)
+        wrapper.columnconfigure(0, weight=1)
+        return tree
+
+    @staticmethod
+    def _fill_tree(tree, dataframe) -> None:
+        tree.delete(*tree.get_children())
+        columns = list(dataframe.columns)
+        tree["columns"] = columns
+        for column in columns:
+            tree.heading(column, text=str(column))
+            tree.column(column, width=145, minwidth=90, anchor=CENTER, stretch=True)
+        for row in dataframe.itertuples(index=False, name=None):
+            values = []
+            for value in row:
+                if isinstance(value, list):
+                    value = ", ".join(map(str, value))
+                values.append(value)
+            tree.insert("", END, values=values)
+
+
+
 
 if __name__ == "__main__":
     HumanMachineApp().run()
+
